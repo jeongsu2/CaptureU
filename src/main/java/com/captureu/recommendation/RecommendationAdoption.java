@@ -47,6 +47,45 @@ public class RecommendationAdoption {
 	@Column(nullable = false)
 	private Instant adoptedAt;
 
+	public enum MatchStatus {
+		/** 사용자가 "이 게시물에 썼어요"로 연결. 자동 연결은 저장하지 않고 조회할 때마다 계산한다 */
+		CONFIRMED
+	}
+
+	@Enumerated(EnumType.STRING)
+	@JdbcTypeCode(SqlTypes.VARCHAR)
+	@Column(length = 20)
+	private MatchStatus matchStatus;
+
+	@Column(length = 32)
+	private String matchedMediaId;
+
+	private Double matchScore;
+
+	private Instant matchedAt;
+
+	@jakarta.persistence.Version
+	private long version;
+
+	/** 사용자가 이 채택을 쓴 게시물을 확인했는지. */
+	public boolean isConfirmed() {
+		return matchStatus == MatchStatus.CONFIRMED;
+	}
+
+	void confirm(String mediaId, Double score, Instant now) {
+		this.matchStatus = MatchStatus.CONFIRMED;
+		this.matchedMediaId = mediaId;
+		this.matchScore = score;
+		this.matchedAt = now;
+	}
+
+	void clearConfirmation() {
+		this.matchStatus = null;
+		this.matchedMediaId = null;
+		this.matchScore = null;
+		this.matchedAt = null;
+	}
+
 	static RecommendationAdoption of(Recommendation r, int hookIndex, RecommendationDraft.HookCandidate hook,
 			Instant now) {
 		RecommendationAdoption a = new RecommendationAdoption();

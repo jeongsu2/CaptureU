@@ -184,6 +184,101 @@ async function showReport(id) {
     box.prepend(el('p', 'hint', '참고 계정이 3개보다 적어 한 계정 스타일에 치우칠 수 있어요.'));
   }
   ['#step-report', '#step-recommend'].forEach((s) => $(s).classList.remove('hidden'));
+  await loadEffects(id);
+}
+
+// 추천 효과 (#14): 채택한 문구로 올린 게시물을 찾아 내 중앙값과 비교
+const STATUS_LABELS = { AUTO: '자동 연결', CONFIRMED: '내가 확인', ASK: '확인 필요', NOT_FOUND: '아직 안 올림' };
+const signed = (n, unit) => (n == null ? '-' : `${n > 0 ? '+' : ''}${n}${unit}`);
+
+async function loadEffects(analysisId) {
+  const section = $('#step-effect');
+  let report;
+  try {
+    report = await api('GET', `/api/analyses/${analysisId}/effects`);
+  } catch (e) {
+    section.classList.remove('hidden');
+    $('#effect').replaceChildren(el('p', 'msg error', `추천 효과를 불러오지 못했어요: ${e.message}`));
+    return;
+  }
+  if (!report.adoptions.length) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  const box = $('#effect');
+  box.replaceChildren();
+  const s = report.summary;
+  box.append(el('p', 'effect-head', s.headline || `채택 ${s.adoptedCount}개 중 올린 게시물 ${s.matchedCount}개를 찾았어요.`));
+  report.adoptions.forEach((a) => box.append(renderAdoption(a, analysisId)));
+  const ul = el('ul', 'notes');
+  s.notes.forEach((n) => ul.append(el('li', null, n)));
+  box.append(ul);
+}
+
+function postThumb(url) {
+  const img = el('img');
+  img.alt = '';
+  img.referrerPolicy = 'no-referrer';
+  if (url && url.startsWith('https://')) img.src = url;
+  return img;
+}
+
+function renderAdoption(a, analysisId) {
+  const node = el('div', 'adoption');
+  const head = el('p');
+  head.append(el('span', 'quote', `“${a.hookText}”`), el('span', 'state', STATUS_LABELS[a.status] || a.status));
+  node.append(head);
+  const error = el('p', 'msg error');
+  const decide = async (mediaId, used) => {
+    error.textContent = '';
+    try {
+      await api('POST', `/api/adoptions/${a.adoptionId}/match`, { analysisId: Number(analysisId), mediaId, used });
+    } catch (e) {
+      error.textContent = e.message;
+      return;
+    }
+    await loadEffects(analysisId);
+  };
+  if (a.post) {
+    const p = a.post;
+    const row = el('div', 'matched');
+    const info = el('div', 'info');
+    if (p.excludedReason === 'NO_METRICS') {
+      info.append(el('p', 'hint', '이번 분석에서 이 게시물의 지표를 받지 못했어요.'));
+    } else {
+      info.append(el('p', null, p.captionFirstLine || ''));
+      const reasons = {
+        YOUNG: `게시 ${p.ageHours}시간 (7일 전이라 참고용)`,
+        NOT_REELS: '릴스가 아니라 비교에서 뺐어요',
+      };
+      info.append(el('p', 'hint', reasons[p.excludedReason] || '게시 7일 지남 · 평균에 넣었어요'));
+      const skip = el('p', null, `스킵률 ${p.skipRate ?? '-'}% · 내 중앙값 대비 `);
+      skip.append(el('span', p.skipRateDiff == null ? null : p.skipRateDiff <= 0 ? 'better' : 'worse', signed(p.skipRateDiff, '%p')));
+      info.append(skip);
+      info.append(el('p', null, `조회수 ${fmt(p.views)} (중앙값의 ${p.viewsMultiple ?? '-'}배) · 저장률 ${signed(p.saveRateDiff, '%p')}`));
+    }
+    const actions = el('div', 'actions');
+    const no = el('button', 'secondary', '이 게시물 아니에요');
+    no.addEventListener('click', () => decide(p.mediaId, false));
+    actions.append(no);
+    info.append(actions);
+    row.append(postThumb(p.thumbnailUrl), info);
+    node.append(row);
+  } else if (a.candidate) {
+    const c = a.candidate;
+    const row = el('div', 'matched');
+    const info = el('div', 'info');
+    info.append(el('p', null, '이 게시물에 썼나요?'), el('p', 'hint', c.captionFirstLine || ''));
+    const actions = el('div', 'actions');
+    const yes = el('button', null, '네, 썼어요');
+    yes.addEventListener('click', () => decide(c.mediaId, true));
+    const no = el('button', 'secondary', '아니에요');
+    no.addEventListener('click', () => decide(c.mediaId, false));
+    actions.append(yes, no);
+    info.append(actions);
+    row.append(postThumb(c.thumbnailUrl), info);
+    node.append(row);
+  }
+  node.append(error);
+  return node;
 }
 
 function renderSummary(s) {

@@ -55,7 +55,7 @@ public final class OutlierCalculator {
 				judged.size() < MIN_SAMPLE);
 	}
 
-	static double median(List<Double> values) {
+	public static double median(List<Double> values) {
 		List<Double> sorted = values.stream().sorted().toList();
 		int n = sorted.size();
 		if (n == 0) {
