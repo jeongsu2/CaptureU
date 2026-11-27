@@ -244,6 +244,8 @@ class AnalysisServiceIntegrationTest {
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.analysisStatus").value("COLLECTING"));
 		mockMvc.perform(get("/api/analyses/999999/outliers")).andExpect(status().isNotFound());
+		mockMvc.perform(get("/api/analyses/" + failed + "/report")).andExpect(status().isUnprocessableContent());
+		mockMvc.perform(get("/api/analyses/999999/report")).andExpect(status().isNotFound());
 		writer.fail(collecting, "TEST", "정리", 0, Instant.now());
 	}
 

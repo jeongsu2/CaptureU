@@ -64,7 +64,7 @@ public class ReportService {
 			.map(r -> new FailedReference(r.getUsername(), r.getFailureType()))
 			.toList();
 		return new AnalysisReport(analysisId, own,
-				ownSummary(outliers.own().igUserId(), outliers.own().outliers(), snapshots), references, failed);
+				ownSummary(outliers.own().accountKey(), outliers.own().outliers(), snapshots), references, failed);
 	}
 
 	private static String key(String account, String mediaId) {
@@ -77,11 +77,11 @@ public class ReportService {
 		List<PostCard> cards = o.outliers()
 			.stream()
 			.limit(MAX_CARDS)
-			.map(p -> toCard(p, snapshots.get(key(result.igUserId(), p.mediaId())), media.get(p.mediaId())))
+			.map(p -> toCard(p, snapshots.get(key(result.accountKey(), p.mediaId())), media.get(p.mediaId())))
 			.filter(Objects::nonNull)
 			.toList();
-		return new AccountReport(result.username(), result.mine(), o.judgedCount(), o.medianViews(), o.meanViews(),
-				o.outliers().size(), cards, o.youngMediaIds().size(), o.lowSample());
+		return new AccountReport(result.username(), result.mine(), o.judgedCount(), o.excludedCount(),
+				o.medianViews(), o.meanViews(), o.outliers().size(), cards, o.youngMediaIds().size(), o.lowSample());
 	}
 
 	private static PostCard toCard(ScoredPost p, MediaMetricSnapshot s, IgMedia m) {
@@ -129,21 +129,23 @@ public class ReportService {
 	}
 
 	/**
-	 * @param judgedCount  판정한 릴스 수 (게시 7일 이상)
-	 * @param outlierCount 중앙값의 2배 이상인 릴스 수
-	 * @param cards        배수 높은 순 최대 5개
-	 * @param youngCount   게시 7일 미만이라 아직 판정하지 않은 릴스 수
-	 * @param lowSample    판정한 릴스가 적어 참고용
+	 * @param judgedCount   판정한 릴스 수 (게시 7일 이상)
+	 * @param excludedCount 게시 7일 이상인데 조회수가 없어 뺀 릴스 수
+	 * @param outlierCount  중앙값의 2배 이상인 릴스 수
+	 * @param cards         배수 높은 순 최대 5개
+	 * @param youngCount    게시 7일 미만이라 아직 판정하지 않은 릴스 수
+	 * @param lowSample     판정한 릴스가 적어 참고용
 	 */
-	public record AccountReport(String username, boolean mine, int judgedCount, Double medianViews, Double meanViews,
-			int outlierCount, List<PostCard> cards, int youngCount, boolean lowSample) {
+	public record AccountReport(String username, boolean mine, int judgedCount, int excludedCount,
+			Double medianViews, Double meanViews, int outlierCount, List<PostCard> cards, int youngCount,
+			boolean lowSample) {
 	}
 
 	/**
 	 * 아웃라이어 카드. 썸네일 URL은 며칠 뒤 만료된다(thumbnailExpiresAt). 저장·공유·스킵률은 내 계정만 있다.
 	 */
 	public record PostCard(String mediaId, String permalink, String thumbnailUrl, Instant thumbnailExpiresAt,
-			String captionFirstLine, Instant postedAt, int views, double multiple, Double commentRate, Integer likes,
+			String captionFirstLine, Instant postedAt, int views, Double multiple, Double commentRate, Integer likes,
 			Integer comments, Integer saved, Integer shares, Double skipRate, Integer avgWatchTimeMs) {
 	}
 
