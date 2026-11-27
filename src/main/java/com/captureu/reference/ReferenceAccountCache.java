@@ -115,6 +115,12 @@ public class ReferenceAccountCache {
 		}
 	}
 
+	/** 진행 중인 로드를 기다리고 있는 요청 수. 테스트에서 기다리는 쪽이 합류한 뒤에 로드를 끝내려고 쓴다. */
+	int waitingFor(String username, int maxMedia) {
+		CompletableFuture<Cached> future = inFlight.get(KEY_PREFIX + username + ":" + maxMedia);
+		return future == null ? 0 : future.getNumberOfDependents();
+	}
+
 	private Lookup load(String key, Supplier<ReferenceAccountData> loader, CompletableFuture<Cached> waiters) {
 		misses.increment();
 		Cached loaded;

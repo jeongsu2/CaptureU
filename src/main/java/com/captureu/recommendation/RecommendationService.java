@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.captureu.analysis.ReportService;
+import com.captureu.profile.ProfileService;
 import com.anthropic.errors.AnthropicServiceException;
 import com.captureu.recommendation.ClaudeHookWriter.LlmDraft;
 import com.captureu.recommendation.ClaudeHookWriter.LlmRefusedException;
@@ -33,14 +34,19 @@ public class RecommendationService {
 	private final ReportService reportService;
 	private final ClaudeHookWriter claude;
 	private final RecommendationRepository repository;
+	private final RecommendationAdoptionRepository adoptionRepository;
+	private final ProfileService profileService;
 	private final JsonMapper jsonMapper;
 	private final Clock clock;
 
 	RecommendationService(ReportService reportService, ClaudeHookWriter claude, RecommendationRepository repository,
-			JsonMapper jsonMapper, Clock clock) {
+			RecommendationAdoptionRepository adoptionRepository, ProfileService profileService, JsonMapper jsonMapper,
+			Clock clock) {
 		this.reportService = reportService;
 		this.claude = claude;
 		this.repository = repository;
+		this.adoptionRepository = adoptionRepository;
+		this.profileService = profileService;
 		this.jsonMapper = jsonMapper;
 		this.clock = clock;
 	}
@@ -65,7 +71,7 @@ public class RecommendationService {
 
 		if (claude.enabled()) {
 			try {
-				LlmDraft llm = claude.write(cleanTopic, summary);
+				LlmDraft llm = claude.write(cleanTopic, summary, profileService.current().orElse(null));
 				draft = llm.draft();
 				generator = Generator.LLM;
 				model = llm.model();
@@ -98,7 +104,7 @@ public class RecommendationService {
 		Recommendation saved = repository.save(Recommendation.of(analysisId, cleanTopic, generator, model,
 				promptVersion, inputTokens, outputTokens, cost, latencyMs, fallbackReason,
 				jsonMapper.writeValueAsString(result), Instant.now(clock)));
-		return RecommendationResponse.of(saved, result);
+		return RecommendationResponse.of(saved, result, List.of());
 	}
 
 	static String failureCode(RuntimeException e) {
@@ -110,7 +116,38 @@ public class RecommendationService {
 
 	public RecommendationResponse get(Long id) {
 		Recommendation r = repository.findById(id).orElseThrow(() -> new RecommendationNotFoundException(id));
-		return RecommendationResponse.of(r, jsonMapper.readValue(r.getResultJson(), RecommendationResult.class));
+		List<Integer> adopted = adoptionRepository.findByRecommendationIdOrderByIdAsc(id)
+			.stream()
+			.map(RecommendationAdoption::getHookIndex)
+			.distinct()
+			.toList();
+		return RecommendationResponse.of(r, result(r), adopted);
+	}
+
+	/** 첫 줄 후보 하나를 "이거 쓸게요"로 고른다. 같은 추천에서 여러 개를 골라도 각각 기록한다. */
+	public AdoptionResponse adopt(Long recommendationId, int hookIndex) {
+		Recommendation r = repository.findById(recommendationId)
+			.orElseThrow(() -> new RecommendationNotFoundException(recommendationId));
+		List<RecommendationDraft.HookCandidate> hooks = result(r).hooks();
+		if (hookIndex < 0 || hookIndex >= hooks.size()) {
+			throw new InvalidHookIndexException(hookIndex, hooks.size());
+		}
+		RecommendationAdoption saved = adoptionRepository
+			.save(RecommendationAdoption.of(r, hookIndex, hooks.get(hookIndex), Instant.now(clock)));
+		return AdoptionResponse.of(saved);
+	}
+
+	private RecommendationResult result(Recommendation r) {
+		return jsonMapper.readValue(r.getResultJson(), RecommendationResult.class);
+	}
+
+	public record AdoptionResponse(Long id, Long recommendationId, int hookIndex, String hookText,
+			com.captureu.analysis.CaptionHook.HookType hookType, String promptVersion, Instant adoptedAt) {
+
+		static AdoptionResponse of(RecommendationAdoption a) {
+			return new AdoptionResponse(a.getId(), a.getRecommendationId(), a.getHookIndex(), a.getHookText(),
+					a.getHookType(), a.getPromptVersion(), a.getAdoptedAt());
+		}
 	}
 
 	/**
@@ -123,16 +160,18 @@ public class RecommendationService {
 	}
 
 	/**
-	 * @param fallbackReason LLM 대신 템플릿을 쓴 이유 (NO_API_KEY, REFUSED, LLM_ERROR: ...). LLM으로 만들었으면 null
+	 * @param fallbackReason     LLM 대신 템플릿을 쓴 이유 (NO_API_KEY, REFUSED, LLM_ERROR: ...). LLM으로 만들었으면 null
+	 * @param adoptedHookIndexes 이미 채택한 첫 줄 후보 번호 (다시 열었을 때 표시용)
 	 */
 	public record RecommendationResponse(Long id, Long analysisId, String topic, Generator generator, String model,
 			String promptVersion, Integer inputTokens, Integer outputTokens, java.math.BigDecimal costUsd,
-			long latencyMs, String fallbackReason, Instant createdAt, RecommendationResult result) {
+			long latencyMs, String fallbackReason, Instant createdAt, RecommendationResult result,
+			List<Integer> adoptedHookIndexes) {
 
-		static RecommendationResponse of(Recommendation r, RecommendationResult result) {
+		static RecommendationResponse of(Recommendation r, RecommendationResult result, List<Integer> adopted) {
 			return new RecommendationResponse(r.getId(), r.getAnalysisId(), r.getTopic(), r.getGenerator(),
 					r.getModel(), r.getPromptVersion(), r.getInputTokens(), r.getOutputTokens(), r.getCostUsd(),
-					r.getLatencyMs(), r.getFallbackReason(), r.getCreatedAt(), result);
+					r.getLatencyMs(), r.getFallbackReason(), r.getCreatedAt(), result, adopted);
 		}
 	}
 }

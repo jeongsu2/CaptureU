@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.captureu.recommendation.RecommendationService.AdoptionResponse;
 import com.captureu.recommendation.RecommendationService.RecommendationResponse;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /** 썸네일 구성안·첫 줄 후보 추천 API (#13). */
@@ -43,6 +45,18 @@ class RecommendationController {
 		return recommendationService.get(id);
 	}
 
+	/** 첫 줄 후보 하나를 채택한다. 예: {"hookIndex": 0} */
+	@PostMapping("/api/recommendations/{id}/adoptions")
+	ResponseEntity<AdoptionResponse> adopt(@PathVariable Long id, @Valid @RequestBody AdoptionRequest request) {
+		AdoptionResponse response = recommendationService.adopt(id, request.hookIndex());
+		return ResponseEntity.status(HttpStatus.CREATED).body(response);
+	}
+
+	@ExceptionHandler(InvalidHookIndexException.class)
+	ProblemDetail invalidIndex(InvalidHookIndexException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
 	@ExceptionHandler(RecommendationNotFoundException.class)
 	ProblemDetail notFound(RecommendationNotFoundException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
@@ -54,6 +68,10 @@ class RecommendationController {
 	}
 
 	/** @param topic 다음 게시물 주제 한 줄. 예: "겨울 출근룩". 첫 줄 후보가 40자를 넘지 않게 40자까지 */
-	record RecommendationRequest(@NotBlank @Size(max = 40) String topic) {
+	record RecommendationRequest(@NotBlank(message = "주제를 한 줄로 넣어 주세요") @Size(max = 40, message = "주제는 40자까지 넣을 수 있어요") String topic) {
+	}
+
+	/** @param hookIndex 첫 줄 후보 번호 (0부터) */
+	record AdoptionRequest(@NotNull(message = "고를 첫 줄 후보 번호가 필요해요") Integer hookIndex) {
 	}
 }

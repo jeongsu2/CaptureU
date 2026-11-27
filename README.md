@@ -66,7 +66,11 @@
 ./gradlew test      # 테스트 (Testcontainers로 MySQL, Redis를 따로 띄움)
 ```
 
-### 내 계정 분석해 보기
+### 화면으로 써 보기
+
+`.env`를 채우고 앱을 실행한 뒤 http://localhost:8080 에서 컨셉 선택 → 참고 계정 등록 → 분석 → 비교 리포트 → 주제 입력·추천 → 문구 복사·채택까지 한 화면에서 할 수 있다.
+
+### 내 계정 분석해 보기 (API)
 
 1. `.env.example`을 복사해 `.env`를 만들고 `IG_ACCESS_TOKEN`, `IG_USER_ID`를 채운다 (`.env`는 커밋되지 않는다)
 2. 앱을 실행하고, 비교할 참고 계정 1~3개를 등록한다 (3개 권장, 프로페셔널 계정만 가능)
@@ -97,7 +101,13 @@ curl http://localhost:8080/api/analyses/{id}/report
 curl -X POST http://localhost:8080/api/analyses/{id}/recommendations -H 'Content-Type: application/json' -d '{"topic":"겨울 출근룩"}'
 ```
 
-참고 계정 2개 이상에서 잘된 첫 줄 유형을 먼저 추천하고, 한 계정에서만 잘된 유형은 그 계정 스타일로 따로 표시한다. 후보마다 근거(예: 참고 계정 3개 중 2개, 9개 중 4개가 아웃라이어)가 붙는다. `.env`에 `ANTHROPIC_API_KEY`가 있으면 Claude로 문구를 만들고, 없거나 호출이 실패하면 규칙 기반 틀로 만든다 (`generator`, `fallbackReason`으로 구분). 토큰, 비용, 걸린 시간도 함께 저장한다.
+참고 계정 2개 이상에서 잘된 첫 줄 유형을 먼저 추천하고, 한 계정에서만 잘된 유형은 그 계정 스타일로 따로 표시한다. 후보마다 근거(예: 참고 계정 3개 중 2개, 9개 중 4개가 아웃라이어)가 붙는다. `.env`에 `ANTHROPIC_API_KEY`가 있으면 Claude로 문구를 만들고, 없거나 호출이 실패하면 규칙 기반 틀로 만든다 (`generator`, `fallbackReason`으로 구분). 토큰, 비용, 걸린 시간도 함께 저장한다. 컨셉(`PUT /api/profile`, 예: `{"main":"BEAUTY","sub":"FASHION"}`)을 골라 두면 Claude 프롬프트에 넣는다.
+
+6. 쓸 문구를 채택한다 (`hookIndex`는 0부터)
+
+```bash
+curl -X POST http://localhost:8080/api/recommendations/{추천 id}/adoptions -H 'Content-Type: application/json' -d '{"hookIndex":0}'
+```
 
 ## 진행
 

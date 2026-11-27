@@ -139,6 +139,12 @@ class ReferenceAccountCacheTest {
 			loads.incrementAndGet();
 			return DATA;
 		}));
+		// 기다리는 쪽이 진행 중인 로드에 합류한 뒤에 끝내야 한다. 먼저 끝내면 Redis에서 읽어 SHARED가 아니게 된다
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+		while (cache.waitingFor("ref.a", 100) == 0 && System.nanoTime() < deadline) {
+			Thread.onSpinWait();
+		}
+		assertThat(cache.waitingFor("ref.a", 100)).isEqualTo(1);
 		release.countDown();
 		first.join(5000);
 		waiter.join(5000);
