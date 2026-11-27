@@ -89,7 +89,15 @@ curl -X POST http://localhost:8080/api/analyses
 curl http://localhost:8080/api/analyses/{id}/report
 ```
 
-계정마다 게시 7일 이상 릴스의 조회수 중앙값과, 중앙값의 2배 이상인 아웃라이어 카드(썸네일, 캡션 첫 줄, 배수)가 나온다. 내 계정은 스킵률·저장률을 아웃라이어와 나머지로 나눠 비교한다. 배수만 보려면 `/api/analyses/{id}/outliers`.
+계정마다 게시 7일 이상 릴스의 조회수 중앙값과, 중앙값의 2배 이상인 아웃라이어 카드(썸네일, 캡션 첫 줄, 배수)가 나온다. 내 계정은 스킵률·저장률을 아웃라이어와 나머지로 나눠 비교한다. 배수만 보려면 `/api/analyses/{id}/outliers`. 계정마다 캡션 첫 줄 유형(질문형, 목록형 등)별 아웃라이어 비율도 나온다.
+
+5. 다음 게시물 주제로 첫 줄 후보와 썸네일 구성안을 추천받는다
+
+```bash
+curl -X POST http://localhost:8080/api/analyses/{id}/recommendations -H 'Content-Type: application/json' -d '{"topic":"겨울 출근룩"}'
+```
+
+참고 계정 2개 이상에서 잘된 첫 줄 유형을 먼저 추천하고, 한 계정에서만 잘된 유형은 그 계정 스타일로 따로 표시한다. 후보마다 근거(예: 참고 계정 3개 중 2개, 9개 중 4개가 아웃라이어)가 붙는다. `.env`에 `ANTHROPIC_API_KEY`가 있으면 Claude로 문구를 만들고, 없거나 호출이 실패하면 규칙 기반 틀로 만든다 (`generator`, `fallbackReason`으로 구분). 토큰, 비용, 걸린 시간도 함께 저장한다.
 
 ## 진행
 
