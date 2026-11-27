@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -91,6 +92,50 @@ class RecommendationIntegrationTest {
 			.andExpect(jsonPath("$.result.hooks[0].text").value("겨울 출근룩, 아직도 이렇게 하세요?"))
 			.andExpect(jsonPath("$.result.notes[0]").value(org.hamcrest.Matchers.containsString("한 계정 스타일")));
 		assertThat(repository.findAll()).anySatisfy(r -> assertThat(r.getAnalysisId()).isEqualTo(analysisId));
+
+		// 채택 (#15): 후보 번호로 고르면 문구와 프롬프트 버전을 함께 기록한다
+		mockMvc.perform(post(location + "/adoptions").contentType(MediaType.APPLICATION_JSON).content("{\"hookIndex\":1}"))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.hookIndex").value(1))
+			.andExpect(jsonPath("$.hookType").value("LIST"))
+			.andExpect(jsonPath("$.hookText").value("겨울 출근룩 3가지 모음.zip"))
+			.andExpect(jsonPath("$.promptVersion").value("template-v1"));
+		mockMvc.perform(post(location + "/adoptions").contentType(MediaType.APPLICATION_JSON).content("{\"hookIndex\":5}"))
+			.andExpect(status().isBadRequest());
+		mockMvc.perform(post(location + "/adoptions").contentType(MediaType.APPLICATION_JSON).content("{}"))
+			.andExpect(status().isBadRequest());
+		mockMvc.perform(post("/api/recommendations/999999/adoptions").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"hookIndex\":0}")).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void 컨셉은_메인_하나와_다른_2순위_하나를_저장한다() throws Exception {
+		mockMvc.perform(get("/api/profile/concepts"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].code").value("BEAUTY"))
+			.andExpect(jsonPath("$[0].label").value("뷰티"));
+		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"main\":\"BEAUTY\",\"sub\":\"FASHION\"}")).andExpect(status().isOk());
+		mockMvc.perform(get("/api/profile"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.main").value("BEAUTY"))
+			.andExpect(jsonPath("$.sub").value("FASHION"));
+		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"main\":\"FOOD\"}")).andExpect(status().isOk());
+		mockMvc.perform(get("/api/profile")).andExpect(jsonPath("$.sub").doesNotExist());
+
+		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"main\":\"FOOD\",\"sub\":\"FOOD\"}")).andExpect(status().isBadRequest());
+		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"sub\":\"FOOD\"}")).andExpect(status().isBadRequest());
+		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"main\":\"NOPE\"}")).andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void 첫_화면을_내려준다() throws Exception {
+		mockMvc.perform(get("/")).andExpect(status().isOk());
+		mockMvc.perform(get("/app.js")).andExpect(status().isOk());
 	}
 
 	@Test

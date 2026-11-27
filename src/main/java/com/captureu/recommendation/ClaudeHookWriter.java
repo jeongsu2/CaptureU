@@ -17,6 +17,7 @@ import com.anthropic.models.messages.StructuredMessageCreateParams;
 import com.anthropic.models.messages.StructuredOutputConfig;
 import com.captureu.analysis.CaptionHook.HookType;
 import com.captureu.common.Texts;
+import com.captureu.profile.ProfileService.Concepts;
 import com.captureu.recommendation.PatternAnalyzer.HookPattern;
 import com.captureu.recommendation.PatternAnalyzer.PatternSummary;
 import com.captureu.recommendation.RecommendationDraft.HookCandidate;
@@ -29,7 +30,7 @@ import com.captureu.recommendation.RecommendationDraft.ThumbnailPlan;
  */
 class ClaudeHookWriter implements AutoCloseable {
 
-	static final String PROMPT_VERSION = "hook-v1";
+	static final String PROMPT_VERSION = "hook-v2";
 	private static final String FALLBACK_BETA = "server-side-fallback-2026-07-01";
 	private static final int MAX_HOOK_LENGTH = 100;
 	private static final int MAX_RATIONALE_LENGTH = 200;
@@ -81,7 +82,7 @@ class ClaudeHookWriter implements AutoCloseable {
 		return client != null;
 	}
 
-	LlmDraft write(String topic, PatternSummary summary) {
+	LlmDraft write(String topic, PatternSummary summary, Concepts concepts) {
 		if (client == null) {
 			throw new IllegalStateException("ANTHROPIC_API_KEY가 없습니다");
 		}
@@ -94,7 +95,7 @@ class ClaudeHookWriter implements AutoCloseable {
 				// 짧은 카피 작성이라 깊게 생각할 필요가 적고, 사용자가 기다리는 요청이라 빠른 쪽을 고른다
 				.effort(OutputConfig.Effort.LOW)
 				.build())
-			.addUserMessage(userPrompt(topic, summary));
+			.addUserMessage(userPrompt(topic, summary, concepts));
 		if (properties.refusalFallback()) {
 			builder.putAdditionalHeader("anthropic-beta", FALLBACK_BETA)
 				.putAdditionalBodyProperty("fallbacks", JsonValue.from("default"));
@@ -166,9 +167,14 @@ class ClaudeHookWriter implements AutoCloseable {
 	}
 
 	/** 분석 결과를 사람이 읽는 형태로 정리한다. 참고 계정 이름과 숫자는 근거로 그대로 쓰게 한다. */
-	static String userPrompt(String topic, PatternSummary summary) {
+	static String userPrompt(String topic, PatternSummary summary, Concepts concepts) {
 		StringBuilder sb = new StringBuilder();
-		sb.append("<topic>").append(safe(topic)).append("</topic>\n\n");
+		sb.append("<topic>").append(safe(topic)).append("</topic>\n");
+		if (concepts != null) {
+			// 컨셉(#15)은 말투와 소재 선택에 쓴다. 근거 숫자는 아래 분석 결과만 쓴다
+			sb.append("크리에이터 컨셉: ").append(concepts.describe()).append('\n');
+		}
+		sb.append('\n');
 		sb.append("비교한 참고 계정 수: ").append(summary.referenceCount()).append('\n');
 		if (summary.patterns().isEmpty()) {
 			sb.append("잘된 첫 줄 유형: 뚜렷한 패턴 없음. 질문형·목록형·방법형처럼 자주 쓰이는 유형으로 만든다.\n");

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CaptureU</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="top">
+  <h1>CaptureU</h1>
+  <p class="sub">내 계정과 참고 계정에서 잘된 릴스를 보고, 다음 릴스의 첫 줄과 썸네일을 추천해요.</p>
+</header>
+
+<main>
+  <section class="card" id="step-concept">
+    <h2><span class="num">1</span> 내 컨셉</h2>
+    <p class="hint">메인 컨셉 1개와 2순위 1개를 골라요. 추천 문구의 말투와 소재에 반영해요.</p>
+    <p class="label">메인</p>
+    <div class="chips" id="main-concepts"></div>
+    <p class="label">2순위 (선택)</p>
+    <div class="chips" id="sub-concepts"></div>
+    <p class="msg" id="concept-msg"></p>
+  </section>
+
+  <section class="card" id="step-refs">
+    <h2><span class="num">2</span> 참고 계정</h2>
+    <p class="hint">비교할 크리에이터 계정을 1~3개 넣어요. 3개를 권장해요 (프로페셔널 계정만 가능).</p>
+    <form id="refs-form" class="row">
+      <input name="u" placeholder="참고 계정 1" autocomplete="off">
+      <input name="u" placeholder="참고 계정 2" autocomplete="off">
+      <input name="u" placeholder="참고 계정 3" autocomplete="off">
+      <button type="submit">저장</button>
+    </form>
+    <p class="msg" id="refs-msg"></p>
+  </section>
+
+  <section class="card" id="step-analysis">
+    <h2><span class="num">3</span> 분석</h2>
+    <p class="hint">지금 시점의 게시물과 지표를 모아 비교해요. 1분 안팎 걸려요.</p>
+    <button id="analyze-btn">분석 시작</button>
+    <p class="msg" id="analysis-msg"></p>
+  </section>
+
+  <section class="card hidden" id="step-report">
+    <h2><span class="num">4</span> 비교 리포트</h2>
+    <div id="own-summary"></div>
+    <div id="accounts"></div>
+  </section>
+
+  <section class="card hidden" id="step-recommend">
+    <h2><span class="num">5</span> 다음 릴스 추천</h2>
+    <form id="topic-form" class="row">
+      <input id="topic" maxlength="100" placeholder="다음 게시물 주제 (예: 겨울 출근룩)" autocomplete="off">
+      <button type="submit">추천받기</button>
+    </form>
+    <p class="msg" id="rec-msg"></p>
+    <div id="recommendation"></div>
+  </section>
+
+  <section class="card hidden" id="step-more">
+    <h2>올린 뒤에도 이어서 볼까요?</h2>
+    <p class="hint">추천 문구로 올린 릴스가 정말 덜 넘겨지는지 확인하고, 올린 직후 반응이 빠르게 오르는 영상을 알려 드려요.</p>
+    <ul class="features">
+      <li>채택한 첫 줄로 올린 게시물을 자동으로 찾아 스킵률·저장률 비교</li>
+      <li>게시 후 몇 시간 안에 평소보다 빠르게 오르는 영상 감지</li>
+    </ul>
+    <button id="more-btn" class="secondary">더 이어서 하기</button>
+    <p class="msg" id="more-msg"></p>
+  </section>
+</main>
+
+<template id="tpl-account">
+  <article class="account">
+    <header><h3 class="name"></h3><span class="badge"></span></header>
+    <p class="stats"></p>
+    <div class="hooktypes"></div>
+    <div class="posts"></div>
+  </article>
+</template>
+
+<template id="tpl-post">
+  <a class="post" target="_blank" rel="noopener noreferrer">
+    <img alt="" loading="lazy" referrerpolicy="no-referrer">
+    <span class="multiple"></span>
+    <span class="line"></span>
+  </a>
+</template>
+
+<template id="tpl-hook">
+  <li class="hook">
+    <div class="hook-main">
+      <span class="type"></span><span class="text"></span>
+      <button class="copy secondary">복사</button><button class="adopt">이거 쓸게요</button>
+    </div>
+    <p class="why"></p>
+  </li>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>
