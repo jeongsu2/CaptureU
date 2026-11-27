@@ -50,7 +50,15 @@ public class MediaMetricSnapshot {
 	@Column(length = 200)
 	private String insightError;
 
-	public static MediaMetricSnapshot of(Long analysisId, MediaItem item, MediaInsights insights, Instant collectedAt) {
+	/** 참고 계정 게시물. 공개 지표(조회수·좋아요·댓글 수)만 있다. */
+	public static MediaMetricSnapshot ofReference(Long analysisId, MediaItem item, Integer viewCount,
+			Instant collectedAt) {
+		MediaMetricSnapshot s = base(analysisId, item, collectedAt);
+		s.views = viewCount;
+		return s;
+	}
+
+	private static MediaMetricSnapshot base(Long analysisId, MediaItem item, Instant collectedAt) {
 		MediaMetricSnapshot s = new MediaMetricSnapshot();
 		s.analysisId = analysisId;
 		s.mediaId = item.id();
@@ -59,6 +67,11 @@ public class MediaMetricSnapshot {
 				: (int) Math.max(0, Duration.between(item.postedAt(), collectedAt).toHours());
 		s.likeCount = item.likeCount();
 		s.commentsCount = item.commentsCount();
+		return s;
+	}
+
+	public static MediaMetricSnapshot of(Long analysisId, MediaItem item, MediaInsights insights, Instant collectedAt) {
+		MediaMetricSnapshot s = base(analysisId, item, collectedAt);
 		s.views = insights.views();
 		s.reach = insights.reach();
 		s.saved = insights.saved();

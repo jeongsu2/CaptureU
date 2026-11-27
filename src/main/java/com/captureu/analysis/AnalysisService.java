@@ -26,6 +26,8 @@ public class AnalysisService {
 	private static final Logger log = LoggerFactory.getLogger(AnalysisService.class);
 
 	private final OwnAccountCollector collector;
+	private final ReferenceCollector referenceCollector;
+	private final AnalysisReferenceRepository analysisReferenceRepository;
 	private final AnalysisWriter writer;
 	private final AnalysisRepository analysisRepository;
 	private final AccountSnapshotRepository accountSnapshotRepository;
@@ -39,10 +41,13 @@ public class AnalysisService {
 	 */
 	private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
 
-	AnalysisService(OwnAccountCollector collector, AnalysisWriter writer, AnalysisRepository analysisRepository,
-			AccountSnapshotRepository accountSnapshotRepository, MediaMetricSnapshotRepository snapshotRepository,
-			GraphApiProperties graphProperties, Clock clock) {
+	AnalysisService(OwnAccountCollector collector, ReferenceCollector referenceCollector,
+			AnalysisReferenceRepository analysisReferenceRepository, AnalysisWriter writer,
+			AnalysisRepository analysisRepository, AccountSnapshotRepository accountSnapshotRepository,
+			MediaMetricSnapshotRepository snapshotRepository, GraphApiProperties graphProperties, Clock clock) {
 		this.collector = collector;
+		this.referenceCollector = referenceCollector;
+		this.analysisReferenceRepository = analysisReferenceRepository;
 		this.writer = writer;
 		this.analysisRepository = analysisRepository;
 		this.accountSnapshotRepository = accountSnapshotRepository;
@@ -84,11 +89,13 @@ public class AnalysisService {
 		ReadContext ctx = new ReadContext();
 		try {
 			Instant collectedAt = Instant.now(clock);
-			var data = collector.collect(igUserId, ctx);
-			analysis = writer.complete(analysis.getId(), data, ctx.callCount(), collectedAt, Instant.now(clock));
-			log.info("분석 {} 완료: 게시물 {}개, 인사이트 실패 {}개, 외부 호출 {}회, {}ms", analysis.getId(),
-					analysis.getMediaCount(), analysis.getInsightFailedCount(), analysis.getApiCallCount(),
-					analysis.getDurationMs());
+			var own = collector.collect(igUserId, ctx);
+			var references = referenceCollector.collect(igUserId, ctx);
+			analysis = writer.complete(analysis.getId(), own, references, ctx.callCount(), collectedAt,
+					Instant.now(clock));
+			log.info("분석 {} 완료: 게시물 {}개, 인사이트 실패 {}개, 참고 계정 {}개, 외부 호출 {}회, {}ms", analysis.getId(),
+					analysis.getMediaCount(), analysis.getInsightFailedCount(), references.size(),
+					analysis.getApiCallCount(), analysis.getDurationMs());
 		}
 		catch (GraphApiException e) {
 			String message = "code=%s subcode=%s: %s".formatted(e.getCode(), e.getSubcode(), e.getDetail());
@@ -120,6 +127,7 @@ public class AnalysisService {
 		var account = accountSnapshotRepository.findById(analysis.getId()).orElse(null);
 		long reelsWithSkipRate = analysis.getStatus() == AnalysisStatus.DONE
 				? snapshotRepository.countByAnalysisIdAndSkipRateIsNotNull(analysis.getId()) : 0;
-		return AnalysisResponse.of(analysis, account, reelsWithSkipRate);
+		return AnalysisResponse.of(analysis, account, reelsWithSkipRate,
+				analysisReferenceRepository.findByAnalysisIdOrderByIdAsc(analysis.getId()));
 	}
 }
