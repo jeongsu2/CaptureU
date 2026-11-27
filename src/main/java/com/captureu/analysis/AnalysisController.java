@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.captureu.analysis.OutlierService.AnalysisOutliers;
+
 /**
  * 분석 요청 API. 지금은 .env에 설정한 계정 하나만 분석한다 (사용자 로그인은 #16).
  * 수집 실패도 분석 기록으로 남기므로 201과 함께 status=FAILED, failureType을 돌려준다.
@@ -21,9 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
 class AnalysisController {
 
 	private final AnalysisService analysisService;
+	private final OutlierService outlierService;
 
-	AnalysisController(AnalysisService analysisService) {
+	AnalysisController(AnalysisService analysisService, OutlierService outlierService) {
 		this.analysisService = analysisService;
+		this.outlierService = outlierService;
 	}
 
 	@PostMapping
@@ -37,9 +41,25 @@ class AnalysisController {
 		return analysisService.get(id);
 	}
 
+	/** 내 계정과 참고 계정별 아웃라이어 (조회수 중앙값 대비 배수, 게시 7일 이상 릴스). */
+	@GetMapping("/{id}/outliers")
+	AnalysisOutliers outliers(@PathVariable Long id) {
+		return outlierService.compute(id);
+	}
+
 	@ExceptionHandler(AnalysisNotFoundException.class)
 	ProblemDetail notFound(AnalysisNotFoundException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+	}
+
+	/** 수집 중이면 409(잠시 후 다시), 실패한 분석이면 422(다시 봐도 결과 없음). */
+	@ExceptionHandler(AnalysisNotReadyException.class)
+	ProblemDetail notReady(AnalysisNotReadyException e) {
+		HttpStatus status = e.getStatus() == AnalysisStatus.FAILED ? HttpStatus.UNPROCESSABLE_CONTENT
+				: HttpStatus.CONFLICT;
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
+		problem.setProperty("analysisStatus", e.getStatus().name());
+		return problem;
 	}
 
 	@ExceptionHandler(AccountNotConnectedException.class)
