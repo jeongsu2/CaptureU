@@ -26,6 +26,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.flywaydb:flyway-mysql'
+	// 추천 문구 생성 (#13). ANTHROPIC_API_KEY가 없으면 쓰지 않고 템플릿으로 추천한다
+	implementation 'com.anthropic:anthropic-java:3.14.0'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	annotationProcessor 'org.projectlombok:lombok'
