@@ -66,6 +66,8 @@ class AnalysisServiceIntegrationTest {
 	ReferenceAccountRepository referenceRepository;
 	@Autowired
 	OutlierService outlierService;
+	@Autowired
+	ReportService reportService;
 
 	@MockitoBean
 	InstagramAccountReader reader;
@@ -208,6 +210,24 @@ class AnalysisServiceIntegrationTest {
 		mockMvc.perform(get("/api/analyses/" + id + "/outliers"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.own.outliers.medianViews").value(1100.0));
+
+		// 비교 리포트 (#10)
+		ReportService.AnalysisReport report = reportService.build(id);
+		assertThat(report.own().cards()).singleElement().satisfies(card -> {
+			assertThat(card.mediaId()).isEqualTo("o4");
+			assertThat(card.multiple()).isEqualTo(4.55);
+			assertThat(card.skipRate()).isEqualTo(50.0);
+			assertThat(card.thumbnailUrl()).isEqualTo("https://t");
+		});
+		assertThat(report.ownSummary().medianSkipRate()).isEqualTo(50.0);
+		assertThat(report.references()).singleElement().satisfies(r -> {
+			assertThat(r.cards()).extracting(ReportService.PostCard::mediaId).containsExactly("x3");
+			assertThat(r.cards().get(0).skipRate()).isNull();
+		});
+		mockMvc.perform(get("/api/analyses/" + id + "/report"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.own.cards[0].mediaId").value("o4"))
+			.andExpect(jsonPath("$.references[0].username").value("ref.a"));
 	}
 
 	@Test
