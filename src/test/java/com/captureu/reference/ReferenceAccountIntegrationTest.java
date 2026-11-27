@@ -57,11 +57,14 @@ class ReferenceAccountIntegrationTest {
 	}
 
 	@Test
-	void 조회되는_계정_2개를_등록한다() {
-		List<ReferenceAccount> saved = service.replace("100", List.of("@Ref.A", "ref.b"));
+	void 조회되는_계정을_3개까지_등록한다() {
+		given(reader.readProfile(eq("100"), eq("ref.c"), any()))
+			.willReturn(new ReferenceProfile("902", "ref.c", 50000, 300));
 
-		assertThat(saved).extracting(ReferenceAccount::getUsername).containsExactly("ref.a", "ref.b");
-		assertThat(service.list("100")).extracting(ReferenceAccount::getIgId).containsExactly("900", "901");
+		List<ReferenceAccount> saved = service.replace("100", List.of("@Ref.A", "ref.b", "ref.c"));
+
+		assertThat(saved).extracting(ReferenceAccount::getUsername).containsExactly("ref.a", "ref.b", "ref.c");
+		assertThat(service.list("100")).extracting(ReferenceAccount::getIgId).containsExactly("900", "901", "902");
 	}
 
 	@Test
@@ -89,16 +92,19 @@ class ReferenceAccountIntegrationTest {
 	}
 
 	@Test
-	void 내_계정이나_3개_이상이나_형식이_틀린_아이디는_거절한다() {
+	void 내_계정이나_4개_이상이나_0개나_형식이_틀린_아이디는_거절한다() {
 		assertThatThrownBy(() -> service.replace("100", List.of("me")))
 			.isInstanceOfSatisfying(ReferenceAccountRejectedException.class,
 					e -> assertThat(e.getRejections().get(0).reason()).isEqualTo("SELF"));
-		assertThatThrownBy(() -> service.replace("100", List.of("a", "b", "c")))
+		assertThatThrownBy(() -> service.replace("100", List.of("a", "b", "c", "d")))
 			.isInstanceOfSatisfying(ReferenceAccountRejectedException.class,
 					e -> assertThat(e.getRejections().get(0).reason()).isEqualTo("TOO_MANY"));
 		assertThatThrownBy(() -> service.replace("100", List.of("bad id")))
 			.isInstanceOfSatisfying(ReferenceAccountRejectedException.class,
 					e -> assertThat(e.getRejections().get(0).reason()).isEqualTo("INVALID_USERNAME"));
+		assertThatThrownBy(() -> service.replace("100", List.of()))
+			.isInstanceOfSatisfying(ReferenceAccountRejectedException.class,
+					e -> assertThat(e.getRejections().get(0).reason()).isEqualTo("TOO_FEW"));
 	}
 
 	@Test
@@ -118,7 +124,7 @@ class ReferenceAccountIntegrationTest {
 
 	@Test
 	void 형식_오류와_개수_초과는_외부_호출_전에_함께_알려준다() {
-		assertThatThrownBy(() -> service.replace("100", List.of("bad id", "a", "b", "c")))
+		assertThatThrownBy(() -> service.replace("100", List.of("bad id", "a", "b", "c", "d")))
 			.isInstanceOfSatisfying(ReferenceAccountRejectedException.class,
 					e -> assertThat(e.getRejections()).extracting(ReferenceAccountService.ReferenceRejection::reason)
 						.containsExactly("INVALID_USERNAME", "TOO_MANY"));

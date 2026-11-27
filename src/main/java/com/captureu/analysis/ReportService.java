@@ -17,6 +17,7 @@ import com.captureu.analysis.OutlierCalculator.AccountOutliers;
 import com.captureu.analysis.OutlierCalculator.ScoredPost;
 import com.captureu.analysis.OutlierService.AccountResult;
 import com.captureu.analysis.OutlierService.AnalysisOutliers;
+import com.captureu.reference.ReferenceAccountService;
 
 /**
  * 비교 리포트. 내 계정과 참고 계정의 아웃라이어 카드, 내 계정의 스킵률·저장률 요약을 한 번에 돌려준다.
@@ -64,7 +65,8 @@ public class ReportService {
 			.map(r -> new FailedReference(r.getUsername(), r.getFailureType()))
 			.toList();
 		return new AnalysisReport(analysisId, own,
-				ownSummary(outliers.own().accountKey(), outliers.own().outliers(), snapshots), references, failed);
+				ownSummary(outliers.own().accountKey(), outliers.own().outliers(), snapshots), references, failed,
+				references.size() < ReferenceAccountService.RECOMMENDED_REFERENCES);
 	}
 
 	private static String key(String account, String mediaId) {
@@ -124,8 +126,11 @@ public class ReportService {
 		return list.isEmpty() ? null : Math.round(OutlierCalculator.median(list) * 100) / 100.0;
 	}
 
+	/**
+	 * @param fewReferences 비교된 참고 계정이 권장(3개)보다 적어 한 계정 스타일에 치우칠 수 있음
+	 */
 	public record AnalysisReport(Long analysisId, AccountReport own, OwnSummary ownSummary,
-			List<AccountReport> references, List<FailedReference> failedReferences) {
+			List<AccountReport> references, List<FailedReference> failedReferences, boolean fewReferences) {
 	}
 
 	/**
