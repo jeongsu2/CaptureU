@@ -1,0 +1,15 @@
+# 로컬 개발 프로필 (기본값).
+# DB, Redis 연결 정보는 spring-boot-docker-compose가 compose.yaml에서 읽어 자동으로 채운다.
+spring:
+  docker:
+    compose:
+      lifecycle-management: start-only
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.captureu: debug
