@@ -1,5 +1,6 @@
 package com.captureu.analysis;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +15,8 @@ import com.captureu.instagram.account.ReferenceAccountReader.ReferenceAccountDat
 import com.captureu.instagram.graph.GraphApiErrorType;
 import com.captureu.instagram.graph.GraphApiException;
 import com.captureu.reference.ReferenceAccount;
+import com.captureu.reference.ReferenceAccountCache;
+import com.captureu.reference.ReferenceAccountCache.Lookup;
 import com.captureu.reference.ReferenceAccountRepository;
 
 /**
@@ -28,15 +31,17 @@ class ReferenceCollector {
 
 	private final ReferenceAccountRepository referenceRepository;
 	private final ReferenceAccountReader reader;
+	private final ReferenceAccountCache cache;
 	private final int maxMedia;
 
 	ReferenceCollector(ReferenceAccountRepository referenceRepository, ReferenceAccountReader reader,
-			@Value("${captureu.reference.max-media:100}") int maxMedia) {
+			ReferenceAccountCache cache, @Value("${captureu.reference.max-media:100}") int maxMedia) {
 		if (maxMedia < 1) {
 			throw new IllegalArgumentException("captureu.reference.max-media는 1 이상이어야 합니다: " + maxMedia);
 		}
 		this.referenceRepository = referenceRepository;
 		this.reader = reader;
+		this.cache = cache;
 		this.maxMedia = maxMedia;
 	}
 
@@ -50,8 +55,11 @@ class ReferenceCollector {
 			ReadContext refCtx = ctx.child();
 			long start = System.nanoTime();
 			try {
-				ReferenceAccountData data = reader.read(ownerIgUserId, username, maxMedia, refCtx);
-				results.add(new CollectedReference(username, data, null, null, refCtx.callCount(), elapsedMs(start)));
+				// 공유 캐시(#9): 같은 참고 계정을 다른 사용자나 이전 분석이 최근에 받았으면 외부 호출 없이 쓴다
+				Lookup lookup = cache.getOrLoad(username, maxMedia, reference.getIgId(),
+						() -> reader.read(ownerIgUserId, username, maxMedia, refCtx));
+				results.add(new CollectedReference(username, lookup.data(), null, null, refCtx.callCount(),
+						elapsedMs(start), lookup.fromCache(), lookup.fetchedAt()));
 			}
 			catch (GraphApiException e) {
 				if (ctx.isAborted() || e.getType() == GraphApiErrorType.TOKEN_INVALID
@@ -63,7 +71,7 @@ class ReferenceCollector {
 				log.info("참고 계정 @{} 수집 실패: {}", username, e.getMessage());
 				results.add(new CollectedReference(username, null, e.getType().name(),
 						"code=%s subcode=%s: %s".formatted(e.getCode(), e.getSubcode(), e.getDetail()),
-						refCtx.callCount(), elapsedMs(start)));
+						refCtx.callCount(), elapsedMs(start), false, null));
 			}
 			catch (RuntimeException e) {
 				// 분석이 멈췄거나 스레드가 중단된 경우는 이 참고 계정만의 실패가 아니므로 그대로 올린다
@@ -73,7 +81,7 @@ class ReferenceCollector {
 				// 참고 계정 하나 때문에 내 계정 분석까지 버리지 않는다
 				log.warn("참고 계정 @{} 수집 중 예상하지 못한 오류", username, e);
 				results.add(new CollectedReference(username, null, "UNEXPECTED", e.getClass().getSimpleName(),
-						refCtx.callCount(), elapsedMs(start)));
+						refCtx.callCount(), elapsedMs(start), false, null));
 			}
 		}
 		return results;
@@ -84,8 +92,11 @@ class ReferenceCollector {
 	}
 
 	/** 성공이면 data가 있고, 실패면 failureType이 있다. */
+	/**
+	 * @param fetchedAt 인스타에서 실제로 받은 시각. 캐시에서 꺼냈으면 분석 시각보다 과거다 (스냅샷 시각으로 쓴다)
+	 */
 	record CollectedReference(String username, ReferenceAccountData data, String failureType, String failureMessage,
-			int apiCallCount, long durationMs) {
+			int apiCallCount, long durationMs, boolean cacheHit, Instant fetchedAt) {
 
 		boolean succeeded() {
 			return data != null;

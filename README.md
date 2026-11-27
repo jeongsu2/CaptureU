@@ -35,8 +35,20 @@
 
 ## 기술 스택
 
-- 지금: Java 21, Spring Boot 4.1, Spring Data JPA, MySQL 8.4, Redis 8.4, Flyway, Docker Compose, Testcontainers, GitHub Actions
-- 계획: Spring Batch, Kafka, Prometheus, Grafana, k6, LLM API
+- 지금: Java 21 (가상 스레드), Spring Boot 4.1, Spring Data JPA, MySQL 8.4, Redis 8.4, Flyway, Docker Compose, Testcontainers, GitHub Actions
+- 계획: Kafka, Prometheus, Grafana, k6, LLM API
+
+## 측정한 개선
+
+실제 계정(게시물 193개)과 참고 계정 3개로 분석 요청 한 건을 쟀다. 개선은 항상 먼저 재고 나서 했다.
+
+| 개선 | 전 | 후 | 이슈 |
+|---|---|---|---|
+| 게시물 인사이트 병렬 수집 (동시 호출 8개로 제한, 치명적 에러 시 즉시 중단) | 139.9초 | **22.9초** (6.1배) | #30 |
+| 참고 계정 공유 캐시 (Redis, TTL 6시간) | 참고 계정당 외부 호출 2회 | **0회** (분석당 207 → 201회) | #9 |
+
+- 동시 호출 수별: 1개 139.9초 / 4개 36.7초 / 8개 22.9초 / 16개 17.4초. 8 → 16은 호출을 두 배로 몰아 쓰는데 5초만 줄어서 8을 기본값으로 했다.
+- 캐시는 응답 시간에는 효과가 없었다. 병렬화 이후 참고 계정은 내 계정과 동시에 모아서 그 시간이 이미 숨어 있었다. 대신 호출 한도를 아낀다.
 
 ## 로컬 실행
 

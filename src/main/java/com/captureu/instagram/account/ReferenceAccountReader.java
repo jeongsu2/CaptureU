@@ -125,6 +125,11 @@ public class ReferenceAccountReader {
 	public record ReferenceMedia(MediaItem item, Integer viewCount) {
 	}
 
+	/** 캐시를 통해 여러 분석이 같은 인스턴스를 함께 쓰므로 목록은 바꿀 수 없게 복사해 둔다. */
 	public record ReferenceAccountData(ReferenceProfile profile, List<ReferenceMedia> media) {
+
+		public ReferenceAccountData {
+			media = List.copyOf(media);
+		}
 	}
 }

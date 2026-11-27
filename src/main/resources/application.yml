@@ -9,6 +9,11 @@ spring:
   lifecycle:
     # 종료할 때 진행 중인 분석(수십 초 걸림)이 끝날 때까지 기다린다
     timeout-per-shutdown-phase: 60s
+  data:
+    redis:
+      # Redis는 캐시 용도라, 느려지면 오래 기다리지 않고 캐시 없이 진행한다 (기본 60초는 너무 김)
+      timeout: 500ms
+      connect-timeout: 1s
   jpa:
     open-in-view: false
     hibernate:
