@@ -44,10 +44,12 @@ public class ReportService {
 
 	public AnalysisReport build(Long analysisId) {
 		AnalysisOutliers outliers = outlierService.compute(analysisId);
+		// 협업 게시물은 계정마다 스냅샷이 따로 있으므로 (계정, 게시물)로 찾는다
 		Map<String, MediaMetricSnapshot> snapshots = snapshotRepository.findByAnalysisId(analysisId)
 			.stream()
-			.collect(Collectors.toMap(MediaMetricSnapshot::getMediaId, Function.identity()));
-		Map<String, IgMedia> media = mediaRepository.findAllById(snapshots.keySet())
+			.collect(Collectors.toMap(s -> key(s.getAccountIgId(), s.getMediaId()), Function.identity()));
+		Map<String, IgMedia> media = mediaRepository
+			.findAllById(snapshots.values().stream().map(MediaMetricSnapshot::getMediaId).distinct().toList())
 			.stream()
 			.collect(Collectors.toMap(IgMedia::getId, Function.identity()));
 
@@ -61,8 +63,12 @@ public class ReportService {
 			.filter(r -> r.getStatus() != AnalysisStatus.DONE)
 			.map(r -> new FailedReference(r.getUsername(), r.getFailureType()))
 			.toList();
-		return new AnalysisReport(analysisId, own, ownSummary(outliers.own().outliers(), snapshots), references,
-				failed);
+		return new AnalysisReport(analysisId, own,
+				ownSummary(outliers.own().igUserId(), outliers.own().outliers(), snapshots), references, failed);
+	}
+
+	private static String key(String account, String mediaId) {
+		return account + "|" + mediaId;
 	}
 
 	private AccountReport toAccountReport(AccountResult result, Map<String, MediaMetricSnapshot> snapshots,
@@ -71,7 +77,7 @@ public class ReportService {
 		List<PostCard> cards = o.outliers()
 			.stream()
 			.limit(MAX_CARDS)
-			.map(p -> toCard(p, snapshots.get(p.mediaId()), media.get(p.mediaId())))
+			.map(p -> toCard(p, snapshots.get(key(result.igUserId(), p.mediaId())), media.get(p.mediaId())))
 			.filter(Objects::nonNull)
 			.toList();
 		return new AccountReport(result.username(), result.mine(), o.judgedCount(), o.medianViews(), o.meanViews(),
@@ -91,11 +97,11 @@ public class ReportService {
 	 * 내 계정 요약. 아웃라이어와 나머지 게시물의 스킵률·저장률을 비교한다.
 	 * "잘된 게시물은 첫 3초에 덜 넘겨졌나"를 보는 기준값이고, 추천 효과 검증(#14)에서도 쓴다.
 	 */
-	private OwnSummary ownSummary(AccountOutliers own, Map<String, MediaMetricSnapshot> snapshots) {
+	private OwnSummary ownSummary(String ownAccount, AccountOutliers own, Map<String, MediaMetricSnapshot> snapshots) {
 		Set<String> outlierIds = own.outliers().stream().map(ScoredPost::mediaId).collect(Collectors.toSet());
 		List<MediaMetricSnapshot> judged = own.posts()
 			.stream()
-			.map(p -> snapshots.get(p.mediaId()))
+			.map(p -> snapshots.get(key(ownAccount, p.mediaId())))
 			.filter(Objects::nonNull)
 			.toList();
 		List<MediaMetricSnapshot> outlierSnaps = judged.stream().filter(s -> outlierIds.contains(s.getMediaId())).toList();
