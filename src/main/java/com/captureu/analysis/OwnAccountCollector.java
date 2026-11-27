@@ -33,10 +33,14 @@ class OwnAccountCollector {
 			collected.add(new CollectedMedia(item, reader.readInsights(item, ctx)));
 		}
 		List<DemographicRow> demographics = reader.readDemographics(igUserId, ctx);
-		return new CollectedAccount(account, collected, demographics);
+		return new CollectedAccount(account, collected, demographics, ctx.isMediaTruncated());
 	}
 
-	record CollectedAccount(AccountInfo account, List<CollectedMedia> media, List<DemographicRow> demographics) {
+	/**
+	 * @param mediaTruncated 페이지 수 상한에 걸려 게시물을 끝까지 받지 못했는지
+	 */
+	record CollectedAccount(AccountInfo account, List<CollectedMedia> media, List<DemographicRow> demographics,
+			boolean mediaTruncated) {
 
 		int insightFailedCount() {
 			return (int) media.stream().filter(m -> m.insights().isFailed()).count();

@@ -6,6 +6,8 @@ import java.time.Instant;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import com.captureu.common.Texts;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -22,6 +24,8 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Analysis {
+
+	static final int MAX_FAILURE_MESSAGE = 500;
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -42,6 +46,9 @@ public class Analysis {
 
 	private int mediaCount;
 
+	/** 페이지 수 상한에 걸려 게시물을 끝까지 받지 못했으면 true. */
+	private boolean mediaTruncated;
+
 	private int insightFailedCount;
 
 	private int apiCallCount;
@@ -51,7 +58,7 @@ public class Analysis {
 	@Column(length = 30)
 	private String failureType;
 
-	@Column(length = 500)
+	@Column(length = MAX_FAILURE_MESSAGE)
 	private String failureMessage;
 
 	public static Analysis start(String igUserId, Instant now) {
@@ -62,9 +69,10 @@ public class Analysis {
 		return analysis;
 	}
 
-	void complete(int mediaCount, int insightFailedCount, int apiCallCount, Instant now) {
+	void complete(int mediaCount, boolean mediaTruncated, int insightFailedCount, int apiCallCount, Instant now) {
 		this.status = AnalysisStatus.DONE;
 		this.mediaCount = mediaCount;
+		this.mediaTruncated = mediaTruncated;
 		this.insightFailedCount = insightFailedCount;
 		finish(apiCallCount, now);
 	}
@@ -72,8 +80,7 @@ public class Analysis {
 	void fail(String failureType, String failureMessage, int apiCallCount, Instant now) {
 		this.status = AnalysisStatus.FAILED;
 		this.failureType = failureType;
-		this.failureMessage = failureMessage == null || failureMessage.length() <= 500 ? failureMessage
-				: failureMessage.substring(0, 500);
+		this.failureMessage = Texts.truncate(failureMessage, MAX_FAILURE_MESSAGE);
 		finish(apiCallCount, now);
 	}
 

@@ -3,10 +3,12 @@ package com.captureu.instagram.account;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -29,7 +31,7 @@ public class InstagramAccountReader {
 	private static final Logger log = LoggerFactory.getLogger(InstagramAccountReader.class);
 
 	static final int PAGE_SIZE = 50;
-	/** 무한 루프 방지. 50개씩 100페이지 = 5,000개. */
+	/** 무한 루프 방지. 50개씩 100페이지 = 5,000개. 넘으면 분석에 '잘림'으로 표시한다. */
 	static final int MAX_PAGES = 100;
 
 	static final List<String> REELS_METRICS = List.of("views", "reach", "saved", "shares", "total_interactions",
@@ -56,9 +58,12 @@ public class InstagramAccountReader {
 				intOrNull(node, "followers_count"), intOrNull(node, "media_count"));
 	}
 
-	/** 게시물 전체를 커서가 끝날 때까지 받는다. media_count는 실제 개수와 다를 수 있어 쓰지 않는다. */
+	/**
+	 * 게시물 전체를 커서가 끝날 때까지 받는다. media_count는 실제 개수와 다를 수 있어 쓰지 않는다.
+	 * 페이지를 넘기는 사이 새 게시물이 올라오면 같은 게시물이 두 번 올 수 있어 ID로 중복을 없앤다.
+	 */
 	public List<MediaItem> readAllMedia(String igUserId, ReadContext ctx) {
-		List<MediaItem> items = new ArrayList<>();
+		Map<String, MediaItem> items = new LinkedHashMap<>();
 		String after = null;
 		for (int page = 0; page < MAX_PAGES; page++) {
 			Map<String, String> params = new LinkedHashMap<>();
@@ -70,26 +75,29 @@ public class InstagramAccountReader {
 			JsonNode node = get(ctx, igUserId + "/media", params);
 			JsonNode data = node.path("data");
 			for (JsonNode m : data) {
-				items.add(toMediaItem(m));
+				toMediaItem(m).ifPresent(item -> items.putIfAbsent(item.id(), item));
 			}
 			JsonNode paging = node.path("paging");
 			after = paging.path("cursors").path("after").asString(null);
-			// paging.next가 없으면 마지막 페이지. next 값(토큰이 든 URL)은 쓰지 않고 커서만 쓴다.
+			// paging.next가 없으면 마지막 페이지. next 값(토큰이 들었던 URL)은 쓰지 않고 커서만 쓴다.
 			if (!paging.has("next") || data.isEmpty() || after == null) {
-				return items;
+				return new ArrayList<>(items.values());
 			}
 		}
+		ctx.markMediaTruncated();
 		log.warn("게시물 페이지가 {}쪽을 넘어 중단함 (받은 게시물 {}개)", MAX_PAGES, items.size());
-		return items;
+		return new ArrayList<>(items.values());
 	}
 
 	/**
 	 * 게시물 인사이트. 릴스와 피드는 받을 수 있는 지표가 다르다.
-	 * 한 번에 요청했다가 일부 지표가 거부되면 지표별로 다시 요청하고, 거부된 지표는 이후 요청에서 뺀다.
+	 * 한 번에 요청했다가 거부되면 지표별로 다시 요청한다. 같은 게시물에서 다른 지표는 받았는데
+	 * 특정 지표만 거부됐을 때만 "그 지표는 지원 안 됨"으로 기억하고 이후 요청에서 뺀다.
+	 * (지표가 전부 거부되면 게시물 쪽 문제라서 기억하지 않는다. 예: 프로페셔널 전환 전 게시물)
 	 */
 	public MediaInsights readInsights(MediaItem media, ReadContext ctx) {
 		List<String> metrics = media.isReels() ? REELS_METRICS : FEED_METRICS;
-		List<String> requested = metrics.stream().filter(m -> !ctx.isUnsupported(media.productType(), m)).toList();
+		List<String> requested = metrics.stream().filter(m -> !ctx.isUnsupported(media, m)).toList();
 		if (requested.isEmpty()) {
 			return MediaInsights.failed("지원되는 지표 없음");
 		}
@@ -108,6 +116,7 @@ public class InstagramAccountReader {
 
 	private MediaInsights readInsightsOneByOne(MediaItem media, List<String> metrics, ReadContext ctx) {
 		Map<String, Number> values = new LinkedHashMap<>();
+		List<String> rejected = new ArrayList<>();
 		String lastError = null;
 		for (String metric : metrics) {
 			try {
@@ -117,12 +126,18 @@ public class InstagramAccountReader {
 				throwIfFatal(e);
 				lastError = e.getDetail();
 				if (e.getType() == GraphApiErrorType.INVALID_REQUEST) {
-					ctx.markUnsupported(media.productType(), metric);
-					log.info("{} 게시물에서 지원하지 않는 지표로 기록: {}", media.productType(), metric);
+					rejected.add(metric);
 				}
 			}
 		}
-		return values.isEmpty() ? MediaInsights.failed(lastError) : MediaInsights.from(values);
+		if (values.isEmpty()) {
+			return MediaInsights.failed(lastError);
+		}
+		for (String metric : rejected) {
+			ctx.markUnsupported(media, metric);
+			log.info("{}/{} 게시물에서 지원하지 않는 지표로 기록: {}", media.productType(), media.mediaType(), metric);
+		}
+		return MediaInsights.from(values);
 	}
 
 	/** 팔로워 연령·성별, 참여자 연령. 팔로워·참여가 100 미만이면 Meta가 주지 않으므로 빈 결과일 수 있다. */
@@ -177,11 +192,24 @@ public class InstagramAccountReader {
 		return values;
 	}
 
-	static MediaItem toMediaItem(JsonNode m) {
-		return new MediaItem(m.path("id").asString(), m.path("media_type").asString(""),
-				m.path("media_product_type").asString(""), parseTime(m.path("timestamp").asString(null)),
-				textOrNull(m, "caption"), textOrNull(m, "thumbnail_url"), textOrNull(m, "media_url"),
-				textOrNull(m, "permalink"), intOrNull(m, "like_count"), intOrNull(m, "comments_count"));
+	/** 형식이 이상한 게시물 하나 때문에 분석 전체가 실패하지 않도록, 읽을 수 없으면 건너뛴다. */
+	static Optional<MediaItem> toMediaItem(JsonNode m) {
+		String id = m.path("id").asString(null);
+		Instant postedAt;
+		try {
+			postedAt = parseTime(m.path("timestamp").asString(null));
+		}
+		catch (DateTimeParseException e) {
+			postedAt = null;
+		}
+		if (id == null || postedAt == null) {
+			log.warn("게시물을 읽을 수 없어 건너뜀 (id={}, timestamp={})", id, m.path("timestamp").asString(null));
+			return Optional.empty();
+		}
+		return Optional.of(new MediaItem(id, m.path("media_type").asString(""),
+				m.path("media_product_type").asString(""), postedAt, textOrNull(m, "caption"),
+				textOrNull(m, "thumbnail_url"), textOrNull(m, "media_url"), textOrNull(m, "permalink"),
+				intOrNull(m, "like_count"), intOrNull(m, "comments_count")));
 	}
 
 	static Instant parseTime(String value) {

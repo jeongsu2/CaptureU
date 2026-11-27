@@ -1,6 +1,7 @@
 package com.captureu.analysis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -48,6 +49,10 @@ class AnalysisServiceIntegrationTest {
 	MediaMetricSnapshotRepository snapshotRepository;
 	@Autowired
 	AudienceDemographicRepository demographicRepository;
+	@Autowired
+	AnalysisRepository analysisRepository;
+	@Autowired
+	AnalysisWriter writer;
 
 	@MockitoBean
 	InstagramAccountReader reader;
@@ -119,6 +124,41 @@ class AnalysisServiceIntegrationTest {
 		assertThat(response.status()).isEqualTo(AnalysisStatus.FAILED);
 		assertThat(response.failureType()).isEqualTo("TOKEN_INVALID");
 		assertThat(response.finishedAt()).isNotNull();
+	}
+
+	@Test
+	void 같은_계정의_분석이_진행_중이면_새_요청을_거절한다() {
+		given(reader.readAllMedia(eq("100"), any())).willAnswer(invocation -> {
+			// 첫 분석이 수집하는 도중에 같은 계정으로 다시 요청
+			assertThatThrownBy(() -> analysisService.request("100")).isInstanceOf(AnalysisInProgressException.class);
+			return List.of(reel, feed);
+		});
+
+		AnalysisResponse first = analysisService.request("100");
+
+		assertThat(first.status()).isEqualTo(AnalysisStatus.DONE);
+		// 끝난 뒤에는 다시 요청할 수 있다
+		assertThat(analysisService.request("100").status()).isEqualTo(AnalysisStatus.DONE);
+	}
+
+	@Test
+	void 서버가_수집_도중_꺼져_남은_분석은_시작할_때_실패로_정리한다() {
+		Analysis stuck = writer.start("100", Instant.parse("2026-11-28T00:00:00Z"));
+
+		analysisService.cleanUpAbandonedAnalyses();
+
+		AnalysisResponse response = analysisService.get(stuck.getId());
+		assertThat(response.status()).isEqualTo(AnalysisStatus.FAILED);
+		assertThat(response.failureType()).isEqualTo(AnalysisWriter.ABANDONED);
+	}
+
+	@Test
+	void 예상하지_못한_오류여도_분석은_수집_중으로_남지_않는다() {
+		given(reader.readAllMedia(eq("100"), any())).willThrow(new IllegalArgumentException("버그"));
+
+		assertThatThrownBy(() -> analysisService.request("100")).isInstanceOf(IllegalArgumentException.class);
+
+		assertThat(analysisRepository.findByStatus(AnalysisStatus.COLLECTING)).isEmpty();
 	}
 
 	@Test

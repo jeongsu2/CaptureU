@@ -42,8 +42,13 @@ class AnalysisController {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
 	}
 
-	@ExceptionHandler(IllegalStateException.class)
-	ProblemDetail notConfigured(IllegalStateException e) {
+	@ExceptionHandler(AccountNotConnectedException.class)
+	ProblemDetail notConnected(AccountNotConnectedException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
+	@ExceptionHandler(AnalysisInProgressException.class)
+	ProblemDetail inProgress(AnalysisInProgressException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
 	}
 }

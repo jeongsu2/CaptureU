@@ -16,6 +16,8 @@ import com.captureu.analysis.OwnAccountCollector.CollectedMedia;
 @Component
 class AnalysisWriter {
 
+	static final String ABANDONED = "ABANDONED";
+
 	private final AnalysisRepository analysisRepository;
 	private final AccountSnapshotRepository accountSnapshotRepository;
 	private final IgMediaRepository mediaRepository;
@@ -57,7 +59,7 @@ class AnalysisWriter {
 			.map(row -> AudienceDemographic.of(analysisId, row))
 			.toList());
 
-		analysis.complete(data.media().size(), data.insightFailedCount(), apiCallCount, now);
+		analysis.complete(data.media().size(), data.mediaTruncated(), data.insightFailedCount(), apiCallCount, now);
 		return analysis;
 	}
 
@@ -66,6 +68,17 @@ class AnalysisWriter {
 		Analysis analysis = analysisRepository.findById(analysisId).orElseThrow();
 		analysis.fail(failureType, failureMessage, apiCallCount, now);
 		return analysis;
+	}
+
+	/**
+	 * '수집 중'으로 남은 분석을 실패로 정리한다. 서버가 수집 도중 꺼지면 이런 행이 남는다.
+	 * 지금은 서버가 한 대라서, 시작할 때 남아 있는 '수집 중'은 모두 중단된 것이다.
+	 */
+	@Transactional
+	int abandonCollecting(Instant now) {
+		List<Analysis> stale = analysisRepository.findByStatus(AnalysisStatus.COLLECTING);
+		stale.forEach(a -> a.fail(ABANDONED, "서버가 수집 도중 중단됨", a.getApiCallCount(), now));
+		return stale.size();
 	}
 
 	private void upsertMedia(String owner, List<CollectedMedia> collected, Instant now) {

@@ -2,9 +2,13 @@ package com.captureu.analysis;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +33,12 @@ public class AnalysisService {
 	private final GraphApiProperties graphProperties;
 	private final Clock clock;
 
+	/**
+	 * 같은 계정의 분석이 동시에 돌면 같은 게시물을 동시에 저장하다 충돌한다 (버튼 두 번 클릭 등).
+	 * 지금은 서버가 한 대라 메모리로 막는다. 서버를 여러 대로 늘리면 분산 락으로 바꾼다.
+	 */
+	private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+
 	AnalysisService(OwnAccountCollector collector, AnalysisWriter writer, AnalysisRepository analysisRepository,
 			AccountSnapshotRepository accountSnapshotRepository, MediaMetricSnapshotRepository snapshotRepository,
 			GraphApiProperties graphProperties, Clock clock) {
@@ -41,15 +51,35 @@ public class AnalysisService {
 		this.clock = clock;
 	}
 
+	@EventListener(ApplicationReadyEvent.class)
+	void cleanUpAbandonedAnalyses() {
+		int count = writer.abandonCollecting(Instant.now(clock));
+		if (count > 0) {
+			log.warn("수집 도중 중단된 분석 {}건을 실패로 정리함", count);
+		}
+	}
+
 	public AnalysisResponse requestForConnectedAccount() {
 		String igUserId = graphProperties.igUserId();
 		if (igUserId == null || igUserId.isBlank()) {
-			throw new IllegalStateException("연결된 인스타 계정 ID가 없습니다 (.env의 IG_USER_ID)");
+			throw new AccountNotConnectedException();
 		}
 		return request(igUserId);
 	}
 
 	public AnalysisResponse request(String igUserId) {
+		if (!inFlight.add(igUserId)) {
+			throw new AnalysisInProgressException(igUserId);
+		}
+		try {
+			return collectAndSave(igUserId);
+		}
+		finally {
+			inFlight.remove(igUserId);
+		}
+	}
+
+	private AnalysisResponse collectAndSave(String igUserId) {
 		Analysis analysis = writer.start(igUserId, Instant.now(clock));
 		ReadContext ctx = new ReadContext();
 		try {
@@ -61,14 +91,19 @@ public class AnalysisService {
 					analysis.getDurationMs());
 		}
 		catch (GraphApiException e) {
-			analysis = writer.fail(analysis.getId(), e.getType().name(), e.getDetail(), ctx.callCount(),
-					Instant.now(clock));
+			String message = "code=%s subcode=%s: %s".formatted(e.getCode(), e.getSubcode(), e.getDetail());
+			analysis = writer.fail(analysis.getId(), e.getType().name(), message, ctx.callCount(), Instant.now(clock));
 			log.warn("분석 {} 실패: {}", analysis.getId(), e.getMessage());
 		}
-		catch (RuntimeException e) {
-			// 예상하지 못한 오류여도 분석이 '수집 중'으로 남지 않게 실패로 기록한다
-			writer.fail(analysis.getId(), "UNEXPECTED", e.getClass().getSimpleName(), ctx.callCount(),
-					Instant.now(clock));
+		catch (Throwable e) {
+			// 예상하지 못한 오류(Error 포함)여도 분석이 '수집 중'으로 남지 않게 실패로 기록하고 원래 예외를 올린다
+			try {
+				writer.fail(analysis.getId(), "UNEXPECTED", e.getClass().getSimpleName(), ctx.callCount(),
+						Instant.now(clock));
+			}
+			catch (RuntimeException writeFailure) {
+				e.addSuppressed(writeFailure);
+			}
 			throw e;
 		}
 		return toResponse(analysis);
@@ -83,12 +118,8 @@ public class AnalysisService {
 
 	private AnalysisResponse toResponse(Analysis analysis) {
 		var account = accountSnapshotRepository.findById(analysis.getId()).orElse(null);
-		long reelsWithInsights = analysis.getStatus() == AnalysisStatus.DONE
-				? snapshotRepository.findByAnalysisId(analysis.getId())
-					.stream()
-					.filter(s -> s.getSkipRate() != null)
-					.count()
-				: 0;
-		return AnalysisResponse.of(analysis, account, reelsWithInsights);
+		long reelsWithSkipRate = analysis.getStatus() == AnalysisStatus.DONE
+				? snapshotRepository.countByAnalysisIdAndSkipRateIsNotNull(analysis.getId()) : 0;
+		return AnalysisResponse.of(analysis, account, reelsWithSkipRate);
 	}
 }

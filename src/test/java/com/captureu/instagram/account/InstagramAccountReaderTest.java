@@ -136,6 +136,55 @@ class InstagramAccountReaderTest {
 	}
 
 	@Test
+	void 지표가_전부_거부되면_게시물_문제로_보고_다음_게시물은_전체_지표로_요청한다() {
+		ReadContext ctx = new ReadContext();
+		String allMetrics = String.join(",", InstagramAccountReader.REELS_METRICS);
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "1/insights")))
+			.andRespond(error(100, "(#100) Media posted before business account conversion"));
+		for (int i = 0; i < InstagramAccountReader.REELS_METRICS.size(); i++) {
+			server.expect(once(), requestTo(Matchers.startsWith(BASE + "1/insights")))
+				.andRespond(error(100, "(#100) Media posted before business account conversion"));
+		}
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "2/insights")))
+			.andExpect(queryParam("metric", allMetrics))
+			.andRespond(json("{\"data\":[{\"name\":\"reels_skip_rate\",\"values\":[{\"value\":41.7}]}]}"));
+
+		MediaInsights first = reader.readInsights(reel("1"), ctx);
+		MediaInsights second = reader.readInsights(reel("2"), ctx);
+
+		assertThat(first.isFailed()).isTrue();
+		assertThat(first.error()).contains("business account conversion");
+		assertThat(second.skipRate()).isEqualTo(41.7);
+		server.verify();
+	}
+
+	@Test
+	void 페이지가_바뀌며_같은_게시물이_두_번_와도_한_번만_담는다() {
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "100/media")))
+			.andRespond(json("""
+					{"data":[%s,%s],"paging":{"cursors":{"after":"C1"},"next":"n"}}
+					""".formatted(media("1", "REELS", "VIDEO"), media("2", "REELS", "VIDEO"))));
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "100/media")))
+			.andRespond(json("""
+					{"data":[%s,%s],"paging":{"cursors":{"after":"C2"}}}
+					""".formatted(media("2", "REELS", "VIDEO"), media("3", "REELS", "VIDEO"))));
+
+		assertThat(reader.readAllMedia("100", new ReadContext())).extracting(MediaItem::id)
+			.containsExactly("1", "2", "3");
+	}
+
+	@Test
+	void 시각을_읽을_수_없는_게시물은_건너뛴다() {
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "100/media")))
+			.andRespond(json("""
+					{"data":[{"id":"bad","media_type":"VIDEO","media_product_type":"REELS","timestamp":"어제"},
+					 {"id":"nots","media_type":"VIDEO","media_product_type":"REELS"},%s]}
+					""".formatted(media("1", "REELS", "VIDEO"))));
+
+		assertThat(reader.readAllMedia("100", new ReadContext())).extracting(MediaItem::id).containsExactly("1");
+	}
+
+	@Test
 	void 게시물_하나의_인사이트를_못_받아도_실패로_표시하고_계속한다() {
 		server.expect(once(), requestTo(Matchers.startsWith(BASE + "1/insights")))
 			.andRespond(error(10, "(#10) Media Posted Before Business Account Conversion"));
