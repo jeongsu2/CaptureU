@@ -30,12 +30,12 @@ final class TemplateHookWriter {
 			HookType.QUESTION, List.of("%s, 아직도 이렇게 하세요?", "%s 이거 저만 몰랐나요?"),
 			HookType.TARGET, List.of("%s 고민인 분들 모여보세요", "%s 필독! 이것만 보세요"),
 			HookType.LIST, List.of("%s 3가지 모음.zip", "%s TOP 3"),
-			HookType.HOW_TO, List.of("%s 쉽게 하는 법", "%s 꿀팁 정리"),
+			HookType.HOW_TO, List.of("%s 실패 없는 꿀팁", "%s 꿀팁 정리"),
 			HookType.STORY, List.of("%s 솔직 후기", "%s 실패담 들려드릴게요"),
 			HookType.ANNOUNCE, List.of("%s 드디어 공개합니다", "%s 커밍순"));
 
 	private static final Map<HookType, String> OVERLAY_SUFFIX = Map.of(HookType.QUESTION, "?", HookType.TARGET,
-			" 필독", HookType.LIST, " 3가지", HookType.HOW_TO, " 하는 법", HookType.STORY, " 후기", HookType.ANNOUNCE,
+			" 필독", HookType.LIST, " 3가지", HookType.HOW_TO, " 꿀팁", HookType.STORY, " 후기", HookType.ANNOUNCE,
 			" 공개");
 
 	private TemplateHookWriter() {
@@ -43,9 +43,17 @@ final class TemplateHookWriter {
 
 	static RecommendationDraft write(String topic, PatternSummary summary) {
 		Map<HookType, String> rationales = new LinkedHashMap<>();
+		boolean singleUsed = false;
 		for (HookPattern p : summary.patterns()) {
 			if (rationales.size() == MAX_TYPES) {
 				break;
+			}
+			// 한 계정 스타일은 많아야 1개만 쓴다 (한 계정에 치우치지 않게)
+			if (p.scope() == PatternAnalyzer.Scope.SINGLE) {
+				if (singleUsed) {
+					continue;
+				}
+				singleUsed = true;
 			}
 			rationales.putIfAbsent(p.type(), PatternAnalyzer.evidence(p, summary.referenceCount()) + " 틀로 만들었어요.");
 		}
@@ -70,7 +78,7 @@ final class TemplateHookWriter {
 
 		HookType top = rationales.keySet().iterator().next();
 		String overlay = shortTopic(topic) + OVERLAY_SUFFIX.get(top);
-		String layout = "첫 프레임 위쪽 1/3에 굵은 글씨 2줄(한 줄 8자 안팎), 인물이나 제품은 가운데. "
+		String layout = "첫 프레임 위쪽 1/3에 굵은 글씨 1~2줄(한 줄 8자 안팎), 인물이나 제품은 가운데. "
 				+ "프로필 그리드(3:4)에서 잘리지 않게 글자는 가운데 정렬.";
 		String rationale = "썸네일 이미지 분석(#11) 전이라 일반 원칙으로 제안했어요. 1순위 첫 줄(" + PatternAnalyzer.label(top)
 				+ ")과 같은 약속을 짧게 넣었어요.";

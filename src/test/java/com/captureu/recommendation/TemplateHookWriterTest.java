@@ -52,6 +52,21 @@ class TemplateHookWriterTest {
 	}
 
 	@Test
+	void 한_계정_스타일은_많아야_하나만_쓴다() {
+		PatternSummary summary = PatternAnalyzer.analyze(report(account("me", true, 40, 8, List.of(), List.of()),
+				List.of(account("ref.a", false, 40, 8, List.of(stat(HookType.STORY, 5, 3)), List.of()),
+						account("ref.b", false, 40, 8, List.of(stat(HookType.TARGET, 5, 3)), List.of()),
+						account("ref.c", false, 40, 8, List.of(stat(HookType.ANNOUNCE, 5, 3)), List.of()))));
+
+		List<HookCandidate> hooks = TemplateHookWriter.write("겨울 출근룩", summary).hooks();
+
+		assertThat(hooks).extracting(HookCandidate::type)
+			.filteredOn(t -> t == HookType.STORY || t == HookType.TARGET || t == HookType.ANNOUNCE)
+			.containsOnly(hooks.get(0).type());
+		assertThat(hooks).extracting(HookCandidate::type).contains(HookType.QUESTION, HookType.LIST);
+	}
+
+	@Test
 	void 썸네일_글자는_단어_중간에서_자르지_않는다() {
 		assertThat(TemplateHookWriter.shortTopic("겨울 데일리 메이크업")).isEqualTo("겨울 데일리");
 		assertThat(TemplateHookWriter.shortTopic("겨울 출근룩")).isEqualTo("겨울 출근룩");

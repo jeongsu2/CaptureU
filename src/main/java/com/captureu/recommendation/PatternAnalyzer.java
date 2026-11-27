@@ -71,7 +71,8 @@ public final class PatternAnalyzer {
 
 	public static PatternSummary analyze(AnalysisReport report) {
 		List<AccountReport> references = report.references();
-		Map<HookType, TypeSignal> ownStrong = strongTypes(report.own());
+		// 판정한 릴스가 적은 내 계정은 참고용이라 패턴 근거로 쓰지 않는다
+		Map<HookType, TypeSignal> ownStrong = report.own().lowSample() ? Map.of() : strongTypes(report.own());
 		Map<HookType, List<TypeSignal>> refStrong = new EnumMap<>(HookType.class);
 		for (AccountReport ref : references) {
 			strongTypes(ref).forEach((type, signal) -> refStrong.computeIfAbsent(type, k -> new ArrayList<>()).add(signal));
@@ -84,7 +85,12 @@ public final class PatternAnalyzer {
 			TypeSignal own = ownStrong.get(type);
 			List<TypeSignal> refs = refStrong.getOrDefault(type, List.of());
 			Scope scope = refs.size() >= COMMON_MIN_ACCOUNTS ? Scope.COMMON : own != null ? Scope.OWN : Scope.SINGLE;
-			patterns.add(new HookPattern(type, scope, own, List.copyOf(refs), examples(report, type)));
+			Set<String> sources = new java.util.HashSet<>();
+			refs.forEach(s -> sources.add(s.username()));
+			if (own != null) {
+				sources.add(own.username());
+			}
+			patterns.add(new HookPattern(type, scope, own, List.copyOf(refs), examples(report, type, sources)));
 		}
 		patterns.sort(ORDER);
 
@@ -127,10 +133,12 @@ public final class PatternAnalyzer {
 		return strong;
 	}
 
-	private static List<String> examples(AnalysisReport report, HookType type) {
+	/** 이 패턴의 근거가 된 계정의 잘된 첫 줄만 예시로 쓴다 (한 계정 스타일에 다른 계정 문장이 섞이지 않게). */
+	private static List<String> examples(AnalysisReport report, HookType type, Set<String> sources) {
 		List<AccountReport> accounts = new ArrayList<>(report.references());
 		accounts.add(report.own());
 		return accounts.stream()
+			.filter(a -> sources.contains(a.username()))
 			.flatMap(a -> a.cards().stream())
 			.filter(c -> c.hookType() == type && c.captionHook() != null)
 			.sorted(Comparator.comparing(PostCard::multiple, Comparator.nullsLast(Comparator.reverseOrder())))

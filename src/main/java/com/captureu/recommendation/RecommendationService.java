@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.captureu.analysis.ReportService;
-import com.captureu.common.Texts;
+import com.anthropic.errors.AnthropicServiceException;
 import com.captureu.recommendation.ClaudeHookWriter.LlmDraft;
 import com.captureu.recommendation.ClaudeHookWriter.LlmRefusedException;
 import com.captureu.recommendation.PatternAnalyzer.HookPattern;
@@ -47,6 +47,10 @@ public class RecommendationService {
 
 	public RecommendationResponse recommend(Long analysisId, String topic) {
 		String cleanTopic = topic.strip();
+		// @NotBlank는 전각 공백(U+3000)을 공백으로 보지 않는다. strip 기준으로 한 번 더 본다
+		if (cleanTopic.isEmpty()) {
+			throw new InvalidTopicException();
+		}
 		PatternSummary summary = PatternAnalyzer.analyze(reportService.build(analysisId));
 
 		long start = System.nanoTime();
@@ -75,10 +79,10 @@ public class RecommendationService {
 				log.warn("추천 생성 요청이 거절돼 템플릿으로 추천합니다. analysisId={}", analysisId);
 			}
 			catch (RuntimeException e) {
-				// SDK 예외 메시지에 키는 들어가지 않는다. 길이만 자른다
-				fallbackReason = Texts.truncate("LLM_ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage(), 300);
-				log.warn("Claude 호출에 실패해 템플릿으로 추천합니다. analysisId={}, error={}", analysisId,
-						e.getClass().getSimpleName());
+				// 외부 오류 원문(요청 ID, 내부 주소 등)은 응답·DB에 남기지 않고 로그로만 본다
+				fallbackReason = failureCode(e);
+				log.warn("Claude 호출에 실패해 템플릿으로 추천합니다. analysisId={}, reason={}", analysisId, fallbackReason);
+				log.debug("Claude 호출 실패 상세", e);
 			}
 		}
 		else {
@@ -95,6 +99,13 @@ public class RecommendationService {
 				promptVersion, inputTokens, outputTokens, cost, latencyMs, fallbackReason,
 				jsonMapper.writeValueAsString(result), Instant.now(clock)));
 		return RecommendationResponse.of(saved, result);
+	}
+
+	static String failureCode(RuntimeException e) {
+		if (e instanceof AnthropicServiceException service) {
+			return "LLM_ERROR: HTTP " + service.statusCode();
+		}
+		return "LLM_ERROR: " + e.getClass().getSimpleName();
 	}
 
 	public RecommendationResponse get(Long id) {

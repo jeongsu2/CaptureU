@@ -99,6 +99,10 @@ class RecommendationIntegrationTest {
 		mockMvc.perform(post("/api/analyses/" + analysisId + "/recommendations")
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"topic\":\"  \"}")).andExpect(status().isBadRequest());
+		// 전각 공백만 있는 주제 (한글 입력기에서 흔함)
+		mockMvc.perform(post("/api/analyses/" + analysisId + "/recommendations")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"topic\":\"\u3000\"}")).andExpect(status().isBadRequest());
 		mockMvc.perform(post("/api/analyses/999999/recommendations").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"topic\":\"홈카페\"}")).andExpect(status().isNotFound());
 

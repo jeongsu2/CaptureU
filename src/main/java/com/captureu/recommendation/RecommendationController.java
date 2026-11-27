@@ -48,7 +48,12 @@ class RecommendationController {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
 	}
 
-	/** @param topic 다음 게시물 주제 한 줄. 예: "겨울 출근룩" */
-	record RecommendationRequest(@NotBlank @Size(max = 100) String topic) {
+	@ExceptionHandler(InvalidTopicException.class)
+	ProblemDetail invalidTopic(InvalidTopicException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
+	/** @param topic 다음 게시물 주제 한 줄. 예: "겨울 출근룩". 첫 줄 후보가 40자를 넘지 않게 40자까지 */
+	record RecommendationRequest(@NotBlank @Size(max = 40) String topic) {
 	}
 }

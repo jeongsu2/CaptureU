@@ -69,6 +69,24 @@ class PatternAnalyzerTest {
 	}
 
 	@Test
+	void 예시는_그_패턴이_잘된_계정의_문장만_쓴다() {
+		// ref.c는 질문형이 잘된 계정이 아니므로 ref.c의 질문형 카드는 예시에서 빠진다
+		AccountReport refCWithCard = account("ref.c", false, 40, 8, List.of(stat(HookType.QUESTION, 10, 2)),
+				List.of(card("ref.c의 질문?", HookType.QUESTION, 9.0, CallToAction.NONE)));
+
+		HookPattern question = PatternAnalyzer.analyze(report(own, List.of(refA, refB, refCWithCard))).patterns().get(0);
+
+		assertThat(question.examples()).doesNotContain("ref.c의 질문?");
+	}
+
+	@Test
+	void 표본이_적은_내_계정은_패턴_근거로_쓰지_않는다() {
+		AccountReport small = account("me", true, 4, 2, List.of(stat(HookType.LIST, 3, 2)), List.of());
+
+		assertThat(PatternAnalyzer.analyze(report(small, List.of())).patterns()).isEmpty();
+	}
+
+	@Test
 	void 참고_계정이_하나면_공통_패턴이_없고_치우침을_안내한다() {
 		PatternSummary summary = PatternAnalyzer.analyze(
 				report(own, List.of(refA), new FailedReference("ref.x", "TARGET_NOT_FOUND")));
