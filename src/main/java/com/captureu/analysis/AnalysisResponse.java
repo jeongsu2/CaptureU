@@ -27,11 +27,11 @@ public record AnalysisResponse(Long id, AnalysisStatus status, String igUserId, 
 
 	/** @param apiCallCount, durationMs 이 참고 계정을 수집하는 데 쓴 외부 호출 수와 시간 */
 	public record ReferenceResult(String username, AnalysisStatus status, Integer followersCount, int mediaCount,
-			int apiCallCount, Long durationMs, String failureType) {
+			int apiCallCount, Long durationMs, boolean cacheHit, String failureType) {
 
 		static ReferenceResult of(AnalysisReference r) {
 			return new ReferenceResult(r.getUsername(), r.getStatus(), r.getFollowersCount(), r.getMediaCount(),
-					r.getApiCallCount(), r.getDurationMs(), r.getFailureType());
+					r.getApiCallCount(), r.getDurationMs(), r.isCacheHit(), r.getFailureType());
 		}
 	}
 }

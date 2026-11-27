@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -67,6 +68,8 @@ class AnalysisServiceIntegrationTest {
 	@Autowired
 	OutlierService outlierService;
 	@Autowired
+	StringRedisTemplate redis;
+	@Autowired
 	ReportService reportService;
 
 	@MockitoBean
@@ -84,6 +87,11 @@ class AnalysisServiceIntegrationTest {
 		snapshotRepository.deleteAll();
 		demographicRepository.deleteAll();
 		referenceRepository.deleteAll();
+		// 테스트끼리 참고 계정 캐시가 섞이지 않게 지운다
+		var keys = redis.keys("captureu:reference:*");
+		if (keys != null && !keys.isEmpty()) {
+			redis.delete(keys);
+		}
 		given(reader.readAccount(eq("100"), any())).willReturn(new AccountInfo("100", "tester", 19664, 44));
 		given(reader.readAllMedia(eq("100"), any())).willReturn(List.of(reel, feed));
 		given(reader.readInsights(eq(reel), any()))
@@ -262,6 +270,32 @@ class AnalysisServiceIntegrationTest {
 		mockMvc.perform(get("/api/analyses/" + failed + "/report")).andExpect(status().isUnprocessableContent());
 		mockMvc.perform(get("/api/analyses/999999/report")).andExpect(status().isNotFound());
 		writer.fail(collecting, "TEST", "정리", 0, Instant.now());
+	}
+
+	@Test
+	void 같은_참고_계정을_다시_분석하면_공유_캐시에서_가져와_외부_호출이_없다() {
+		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 1, Instant.now()));
+		MediaItem refReel = new MediaItem("r1", "VIDEO", "REELS", Instant.parse("2026-11-01T00:00:00Z"), "첫 줄 😀",
+				"https://cdn/r.jpg", null, "https://p/r1", null, 17);
+		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any())).willReturn(new ReferenceAccountData(
+				new ReferenceProfile("900", "ref.a", 78958, 1152), List.of(new ReferenceMedia(refReel, 29624))));
+
+		AnalysisResponse first = analysisService.request("100");
+		AnalysisResponse second = analysisService.request("100");
+
+		org.mockito.Mockito.verify(referenceReader, org.mockito.Mockito.times(1))
+			.read(eq("100"), eq("ref.a"), anyInt(), any());
+		assertThat(first.references()).singleElement().satisfies(r -> assertThat(r.cacheHit()).isFalse());
+		assertThat(second.references()).singleElement().satisfies(r -> {
+			assertThat(r.cacheHit()).isTrue();
+			assertThat(r.apiCallCount()).isZero();
+			assertThat(r.mediaCount()).isEqualTo(1);
+		});
+		// 캐시에서 꺼낸 게시물도 똑같이 저장된다 (이모지 포함 캡션까지)
+		assertThat(snapshotRepository.findByAnalysisId(second.id())).filteredOn(s -> s.getMediaId().equals("r1"))
+			.singleElement()
+			.satisfies(s -> assertThat(s.getViews()).isEqualTo(29624));
+		assertThat(mediaRepository.findById("r1").orElseThrow().getCaptionFirstLine()).isEqualTo("첫 줄 😀");
 	}
 
 	@Test

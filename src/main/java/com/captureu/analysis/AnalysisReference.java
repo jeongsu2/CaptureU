@@ -49,6 +49,9 @@ public class AnalysisReference {
 
 	private Long durationMs;
 
+	/** 공유 캐시에서 가져왔는지 (#9). */
+	private boolean cacheHit;
+
 	@Column(length = 30)
 	private String failureType;
 
@@ -56,7 +59,7 @@ public class AnalysisReference {
 	private String failureMessage;
 
 	static AnalysisReference done(Long analysisId, String username, String igId, Integer followersCount,
-			int mediaCount, int apiCallCount, long durationMs) {
+			int mediaCount, int apiCallCount, long durationMs, boolean cacheHit) {
 		AnalysisReference r = new AnalysisReference();
 		r.analysisId = analysisId;
 		r.username = username;
@@ -66,6 +69,7 @@ public class AnalysisReference {
 		r.mediaCount = mediaCount;
 		r.apiCallCount = apiCallCount;
 		r.durationMs = durationMs;
+		r.cacheHit = cacheHit;
 		return r;
 	}
 

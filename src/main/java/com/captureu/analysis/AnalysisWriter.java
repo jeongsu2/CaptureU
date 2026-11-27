@@ -94,7 +94,7 @@ class AnalysisWriter {
 				}
 			}
 			referenceResults.add(AnalysisReference.done(analysisId, ref.username(), profile.igId(),
-					profile.followersCount(), refSeen.size(), ref.apiCallCount(), ref.durationMs()));
+					profile.followersCount(), refSeen.size(), ref.apiCallCount(), ref.durationMs(), ref.cacheHit()));
 		}
 		List<OwnedMedia> allMedia = new ArrayList<>(mediaById.values());
 
