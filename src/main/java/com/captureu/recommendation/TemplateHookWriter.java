@@ -7,6 +7,8 @@ import java.util.Map;
 
 import com.captureu.analysis.CaptionHook.HookType;
 import com.captureu.common.Texts;
+import com.captureu.thumbnail.ThumbnailService;
+import com.captureu.thumbnail.ThumbnailService.ThumbnailSignal;
 import com.captureu.recommendation.PatternAnalyzer.HookPattern;
 import com.captureu.recommendation.PatternAnalyzer.PatternSummary;
 import com.captureu.recommendation.RecommendationDraft.HookCandidate;
@@ -38,10 +40,30 @@ final class TemplateHookWriter {
 			" 필독", HookType.LIST, " 3가지", HookType.HOW_TO, " 꿀팁", HookType.STORY, " 후기", HookType.ANNOUNCE,
 			" 공개");
 
+	/** 잘된 썸네일 특징(#11)별 구성 지시. */
+	private static final Map<ThumbnailService.Feature, String> INSTRUCTIONS = new java.util.EnumMap<>(Map.ofEntries(
+			Map.entry(ThumbnailService.Feature.FACE_CLOSE_UP, "얼굴을 화면의 1/3 이상으로 크게 잡아요."),
+			Map.entry(ThumbnailService.Feature.LARGE_TEXT, "제목 글씨를 화면 폭 절반 이상으로 크게 넣어요."),
+			Map.entry(ThumbnailService.Feature.ANY_TEXT, "핵심 문구를 짧은 글씨로 넣어요."),
+			Map.entry(ThumbnailService.Feature.NO_PERSON, "사람 없이 제품이나 장면 위주로 찍어요."),
+			Map.entry(ThumbnailService.Feature.TONE_BRIGHT, "밝고 화사한 색감으로 맞춰요."),
+			Map.entry(ThumbnailService.Feature.TONE_DARK, "어둡고 무드 있는 색감으로 맞춰요."),
+			Map.entry(ThumbnailService.Feature.TONE_PASTEL, "연한 파스텔 색감으로 맞춰요."),
+			Map.entry(ThumbnailService.Feature.TONE_VIVID, "채도 높은 강렬한 색감으로 맞춰요."),
+			Map.entry(ThumbnailService.Feature.CENTER_SUBJECT, "인물이나 제품 하나를 가운데에 둬요."),
+			Map.entry(ThumbnailService.Feature.FULL_BODY, "전신이 다 보이게 찍어요."),
+			Map.entry(ThumbnailService.Feature.FLAT_LAY, "제품을 위에서 내려다본 구도로 놓아요."),
+			Map.entry(ThumbnailService.Feature.SPLIT, "전후 비교처럼 화면을 나눠요."),
+			Map.entry(ThumbnailService.Feature.TEXT_CARD, "글자가 주인공인 카드처럼 만들어요.")));
+
 	private TemplateHookWriter() {
 	}
 
 	static RecommendationDraft write(String topic, PatternSummary summary) {
+		return write(topic, summary, List.of());
+	}
+
+	static RecommendationDraft write(String topic, PatternSummary summary, List<ThumbnailSignal> thumbnails) {
 		Map<HookType, String> rationales = new LinkedHashMap<>();
 		boolean singleUsed = false;
 		for (HookPattern p : summary.patterns()) {
@@ -80,8 +102,14 @@ final class TemplateHookWriter {
 		String overlay = shortTopic(topic) + OVERLAY_SUFFIX.get(top);
 		String layout = "첫 프레임 위쪽 1/3에 굵은 글씨 1~2줄(한 줄 8자 안팎), 인물이나 제품은 가운데. "
 				+ "프로필 그리드(3:4)에서 잘리지 않게 글자는 가운데 정렬.";
-		String rationale = "썸네일 이미지 분석(#11) 전이라 일반 원칙으로 제안했어요. 1순위 첫 줄(" + PatternAnalyzer.label(top)
+		String rationale = "썸네일 이미지 분석 결과가 없어 일반 원칙으로 제안했어요. 1순위 첫 줄(" + PatternAnalyzer.label(top)
 				+ ")과 같은 약속을 짧게 넣었어요.";
+		if (thumbnails != null && !thumbnails.isEmpty()) {
+			List<ThumbnailSignal> used = thumbnails.stream().limit(2).toList();
+			layout = used.stream().map(s -> INSTRUCTIONS.get(s.feature())).collect(java.util.stream.Collectors.joining(" "))
+					+ " 글자는 프로필 그리드(3:4)에서 잘리지 않게 가운데 정렬.";
+			rationale = used.get(0).evidence() + "을 따랐어요.";
+		}
 		return new RecommendationDraft(List.copyOf(hooks), new ThumbnailPlan(overlay, layout, rationale));
 	}
 

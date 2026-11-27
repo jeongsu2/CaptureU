@@ -1,4 +1,4 @@
-package com.captureu.recommendation;
+package com.captureu.llm;
 
 import java.time.Duration;
 

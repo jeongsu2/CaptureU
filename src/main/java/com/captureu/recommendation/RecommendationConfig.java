@@ -1,11 +1,11 @@
 package com.captureu.recommendation;
 
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import com.captureu.llm.LlmProperties;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties(LlmProperties.class)
 class RecommendationConfig {
 
 	@Bean
