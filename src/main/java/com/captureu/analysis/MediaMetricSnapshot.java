@@ -31,6 +31,10 @@ public class MediaMetricSnapshot {
 	@Column(nullable = false, length = 32)
 	private String mediaId;
 
+	/** 이 게시물을 어느 계정의 게시물로 수집했는지 (협업 게시물은 두 계정에 모두 속한다). */
+	@Column(nullable = false, length = 32)
+	private String accountIgId;
+
 	@Column(nullable = false)
 	private Instant collectedAt;
 
@@ -51,16 +55,17 @@ public class MediaMetricSnapshot {
 	private String insightError;
 
 	/** 참고 계정 게시물. 공개 지표(조회수·좋아요·댓글 수)만 있다. */
-	public static MediaMetricSnapshot ofReference(Long analysisId, MediaItem item, Integer viewCount,
-			Instant collectedAt) {
-		MediaMetricSnapshot s = base(analysisId, item, collectedAt);
+	public static MediaMetricSnapshot ofReference(Long analysisId, String accountIgId, MediaItem item,
+			Integer viewCount, Instant collectedAt) {
+		MediaMetricSnapshot s = base(analysisId, accountIgId, item, collectedAt);
 		s.views = viewCount;
 		return s;
 	}
 
-	private static MediaMetricSnapshot base(Long analysisId, MediaItem item, Instant collectedAt) {
+	private static MediaMetricSnapshot base(Long analysisId, String accountIgId, MediaItem item, Instant collectedAt) {
 		MediaMetricSnapshot s = new MediaMetricSnapshot();
 		s.analysisId = analysisId;
+		s.accountIgId = accountIgId;
 		s.mediaId = item.id();
 		s.collectedAt = collectedAt;
 		s.ageHours = item.postedAt() == null ? 0
@@ -70,8 +75,10 @@ public class MediaMetricSnapshot {
 		return s;
 	}
 
-	public static MediaMetricSnapshot of(Long analysisId, MediaItem item, MediaInsights insights, Instant collectedAt) {
-		MediaMetricSnapshot s = base(analysisId, item, collectedAt);
+	/** 내 계정 게시물. 인사이트(저장·공유·스킵률 등)까지 있다. */
+	public static MediaMetricSnapshot of(Long analysisId, String accountIgId, MediaItem item, MediaInsights insights,
+			Instant collectedAt) {
+		MediaMetricSnapshot s = base(analysisId, accountIgId, item, collectedAt);
 		s.views = insights.views();
 		s.reach = insights.reach();
 		s.saved = insights.saved();

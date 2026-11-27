@@ -3,6 +3,7 @@ package com.captureu.analysis;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,37 +57,39 @@ class AnalysisWriter {
 		accountSnapshotRepository.save(new AccountSnapshot(analysisId, owner, own.account().username(),
 				own.account().followersCount(), own.account().reportedMediaCount()));
 
-		List<OwnedMedia> allMedia = new ArrayList<>();
+		// 게시물 행은 하나지만, 지표 스냅샷은 "어느 계정의 게시물로 수집했는지"별로 따로 저장한다.
+		// 협업 게시물은 내 계정과 참고 계정 모두의 게시물로 오므로 두 계정 비교에 모두 들어가야 한다.
+		Map<String, OwnedMedia> mediaById = new LinkedHashMap<>();
 		List<MediaMetricSnapshot> snapshots = new ArrayList<>();
-		// 같은 게시물이 두 번 들어가면 (분석, 게시물) 유니크 키가 깨지므로 한 분석 안에서 한 번만 저장한다
-		Set<String> seen = new HashSet<>();
+		Set<String> ownSeen = new HashSet<>();
 		for (var m : own.media()) {
-			if (seen.add(m.item().id())) {
-				allMedia.add(new OwnedMedia(owner, m.item()));
-				snapshots.add(MediaMetricSnapshot.of(analysisId, m.item(), m.insights(), collectedAt));
+			if (ownSeen.add(m.item().id())) {
+				mediaById.put(m.item().id(), new OwnedMedia(owner, m.item(), true));
+				snapshots.add(MediaMetricSnapshot.of(analysisId, owner, m.item(), m.insights(), collectedAt));
 			}
 		}
 
 		List<AnalysisReference> referenceResults = new ArrayList<>();
 		for (CollectedReference ref : references) {
 			if (!ref.succeeded()) {
-				referenceResults.add(
-						AnalysisReference.failed(analysisId, ref.username(), ref.failureType(), ref.failureMessage()));
+				referenceResults.add(AnalysisReference.failed(analysisId, ref.username(), ref.failureType(),
+						ref.failureMessage(), ref.apiCallCount(), ref.durationMs()));
 				continue;
 			}
 			var profile = ref.data().profile();
-			String refOwner = profile.igId() != null ? profile.igId() : "@" + ref.username();
-			int saved = 0;
+			String account = referenceAccountId(profile.igId(), ref.username());
+			Set<String> refSeen = new HashSet<>();
 			for (ReferenceMedia rm : ref.data().media()) {
-				if (seen.add(rm.item().id())) {
-					allMedia.add(new OwnedMedia(refOwner, rm.item()));
-					snapshots.add(MediaMetricSnapshot.ofReference(analysisId, rm.item(), rm.viewCount(), collectedAt));
-					saved++;
+				if (refSeen.add(rm.item().id())) {
+					mediaById.putIfAbsent(rm.item().id(), new OwnedMedia(account, rm.item(), false));
+					snapshots.add(
+							MediaMetricSnapshot.ofReference(analysisId, account, rm.item(), rm.viewCount(), collectedAt));
 				}
 			}
 			referenceResults.add(AnalysisReference.done(analysisId, ref.username(), profile.igId(),
-					profile.followersCount(), saved));
+					profile.followersCount(), refSeen.size(), ref.apiCallCount(), ref.durationMs()));
 		}
+		List<OwnedMedia> allMedia = new ArrayList<>(mediaById.values());
 
 		upsertMedia(allMedia, now);
 		snapshotRepository.saveAll(snapshots);
@@ -129,11 +132,20 @@ class AnalysisWriter {
 				return IgMedia.from(m.owner(), m.item(), now);
 			}
 			media.update(m.item(), now);
+			// 참고 계정을 통해 먼저 저장된 게시물이 사실 내 게시물이면 소유자를 바로잡는다 (협업 게시물 등)
+			if (m.mine()) {
+				media.claimOwner(m.owner());
+			}
 			return media;
 		}).toList();
 		mediaRepository.saveAll(toSave);
 	}
 
-	private record OwnedMedia(String owner, MediaItem item) {
+	/** 참고 계정 ID가 응답에 없으면 아이디로 구분한다. */
+	static String referenceAccountId(String igId, String username) {
+		return igId != null ? igId : "@" + username;
+	}
+
+	private record OwnedMedia(String owner, MediaItem item, boolean mine) {
 	}
 }

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -46,6 +47,20 @@ public class ReferenceAccountService {
 	 * 외부 조회는 트랜잭션 밖에서 하고, 모두 통과하면 한 트랜잭션으로 바꾼다.
 	 */
 	public List<ReferenceAccount> replace(String ownerIgUserId, List<String> rawUsernames) {
+		// 같은 사용자가 동시에 바꾸면 2개 제한이 깨지거나 유니크 키가 충돌한다 (버튼 두 번 클릭 등)
+		if (!inFlight.add(ownerIgUserId)) {
+			throw new ReferenceUpdateInProgressException();
+		}
+		try {
+			return doReplace(ownerIgUserId, rawUsernames);
+		}
+		finally {
+			inFlight.remove(ownerIgUserId);
+		}
+	}
+
+	private List<ReferenceAccount> doReplace(String ownerIgUserId, List<String> rawUsernames) {
+		// 1. 형식 검사: 외부 호출 전에 끝낸다
 		Set<String> usernames = new LinkedHashSet<>();
 		List<ReferenceRejection> rejections = new ArrayList<>();
 		for (String raw : rawUsernames) {
@@ -57,10 +72,13 @@ public class ReferenceAccountService {
 			}
 		}
 		if (usernames.size() > MAX_REFERENCES) {
-			throw new ReferenceAccountRejectedException(
-					List.of(new ReferenceRejection(null, "TOO_MANY", "참고 계정은 최대 %d개예요".formatted(MAX_REFERENCES))));
+			rejections.add(new ReferenceRejection(null, "TOO_MANY", "참고 계정은 최대 %d개예요".formatted(MAX_REFERENCES)));
+		}
+		if (!rejections.isEmpty()) {
+			throw new ReferenceAccountRejectedException(rejections);
 		}
 
+		// 2. 계정마다 조회해 보기. 계정 자체의 문제만 거절 사유로 돌려주고, 일시 장애·토큰·한도는 그대로 올린다
 		Instant now = Instant.now(clock);
 		List<ReferenceAccount> accepted = new ArrayList<>();
 		for (String username : usernames) {
@@ -70,11 +88,11 @@ public class ReferenceAccountService {
 					rejections.add(new ReferenceRejection(username, "SELF", "내 계정은 참고 계정으로 넣을 수 없어요"));
 					continue;
 				}
-				accepted.add(new ReferenceAccount(ownerIgUserId, profile.username(), profile.igId(),
-						profile.followersCount(), now));
+				accepted.add(new ReferenceAccount(ownerIgUserId, username, profile.igId(), profile.followersCount(),
+						now));
 			}
 			catch (GraphApiException e) {
-				if (e.getType() == GraphApiErrorType.TOKEN_INVALID || e.getType() == GraphApiErrorType.RATE_LIMITED) {
+				if (!ACCOUNT_PROBLEMS.contains(e.getType())) {
 					throw e;
 				}
 				rejections.add(new ReferenceRejection(username, e.getType().name(), reasonFor(e.getType())));
@@ -83,18 +101,25 @@ public class ReferenceAccountService {
 		if (!rejections.isEmpty()) {
 			throw new ReferenceAccountRejectedException(rejections);
 		}
+
+		// 3. 모두 통과하면 한 트랜잭션으로 교체
 		return transaction.execute(status -> {
-			repository.deleteByOwnerIgUserId(ownerIgUserId);
-			repository.flush();
+			repository.deleteAllByOwner(ownerIgUserId);
 			return repository.saveAll(accepted);
 		});
 	}
+
+	/** 이 에러들만 '그 계정을 넣을 수 없다'는 사용자 안내로 바꾼다. */
+	private static final Set<GraphApiErrorType> ACCOUNT_PROBLEMS = Set.of(GraphApiErrorType.TARGET_NOT_FOUND,
+			GraphApiErrorType.PERMISSION_DENIED, GraphApiErrorType.INVALID_REQUEST);
+
+	private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
 
 	static String reasonFor(GraphApiErrorType type) {
 		return switch (type) {
 			case TARGET_NOT_FOUND -> "개인 계정이거나 없는 아이디예요. 프로페셔널(비즈니스·크리에이터) 계정 아이디를 넣어 주세요";
 			case PERMISSION_DENIED -> "이 계정의 정보를 볼 권한이 없어요";
-			default -> "지금은 이 계정을 조회할 수 없어요. 잠시 후 다시 시도해 주세요";
+			default -> "이 계정은 조회할 수 없어요";
 		};
 	}
 

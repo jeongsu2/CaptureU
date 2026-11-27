@@ -115,4 +115,32 @@ class ReferenceAccountIntegrationTest {
 			.andExpect(jsonPath("$[0].username").value("ref.a"))
 			.andExpect(jsonPath("$[0].followersCount").value(78958));
 	}
+
+	@Test
+	void 형식_오류와_개수_초과는_외부_호출_전에_함께_알려준다() {
+		assertThatThrownBy(() -> service.replace("100", List.of("bad id", "a", "b", "c")))
+			.isInstanceOfSatisfying(ReferenceAccountRejectedException.class,
+					e -> assertThat(e.getRejections()).extracting(ReferenceAccountService.ReferenceRejection::reason)
+						.containsExactly("INVALID_USERNAME", "TOO_MANY"));
+		org.mockito.Mockito.verify(reader, org.mockito.Mockito.never()).readProfile(any(), any(), any());
+	}
+
+	@Test
+	void 인스타_쪽_장애는_사용자_입력_오류가_아니라_서버_쪽_상태로_응답한다() throws Exception {
+		given(reader.readProfile(eq("100"), eq("slow"), any()))
+			.willThrow(new GraphApiException(GraphApiErrorType.TEMPORARY, 502, null, null, "bad gateway"));
+		given(reader.readProfile(eq("100"), eq("expired"), any()))
+			.willThrow(new GraphApiException(GraphApiErrorType.TOKEN_INVALID, 400, 190, 464, "Sessions not allowed"));
+		given(reader.readProfile(eq("100"), eq("limited"), any()))
+			.willThrow(new GraphApiException(GraphApiErrorType.RATE_LIMITED, 403, 80002, null, "limit"));
+
+		mockMvc.perform(put("/api/reference-accounts").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"usernames\":[\"slow\"]}")).andExpect(status().isBadGateway());
+		mockMvc.perform(put("/api/reference-accounts").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"usernames\":[\"expired\"]}"))
+			.andExpect(status().isServiceUnavailable())
+			.andExpect(jsonPath("$.errorType").value("TOKEN_INVALID"));
+		mockMvc.perform(put("/api/reference-accounts").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"usernames\":[\"limited\"]}")).andExpect(status().isTooManyRequests());
+	}
 }

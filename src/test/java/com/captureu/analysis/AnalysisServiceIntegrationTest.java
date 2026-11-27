@@ -133,18 +133,39 @@ class AnalysisServiceIntegrationTest {
 		AnalysisResponse response = analysisService.request("100");
 
 		assertThat(response.status()).isEqualTo(AnalysisStatus.DONE);
-		assertThat(response.references()).extracting(r -> r.username() + ":" + r.status() + ":" + r.mediaCount())
-			// 참고 계정에 내 게시물(m1)이 섞여 와도 한 분석 안에서 한 번만 저장한다
-			.containsExactly("ref.a:DONE:1", "ref.b:FAILED:0");
+		assertThat(response.references())
+			.extracting(r -> r.username() + ":" + r.status() + ":" + r.mediaCount() + ":" + r.apiCallCount())
+			// 협업 게시물(m1)은 내 계정과 참고 계정 모두의 게시물로 센다
+			.containsExactly("ref.a:DONE:2:0", "ref.b:FAILED:0:0");
+		assertThat(response.references()).allSatisfy(r -> assertThat(r.durationMs()).isNotNull());
 		assertThat(mediaRepository.findById("r1").orElseThrow().getOwnerIgUserId()).isEqualTo("900");
-		assertThat(snapshotRepository.findByAnalysisId(response.id()))
-			.filteredOn(s -> s.getMediaId().equals("r1"))
+		// 협업 게시물의 소유자는 내 계정
+		assertThat(mediaRepository.findById("m1").orElseThrow().getOwnerIgUserId()).isEqualTo("100");
+		List<MediaMetricSnapshot> snapshots = snapshotRepository.findByAnalysisId(response.id());
+		assertThat(snapshots).filteredOn(s -> s.getMediaId().equals("m1"))
+			.extracting(MediaMetricSnapshot::getAccountIgId)
+			.containsExactlyInAnyOrder("100", "900");
+		assertThat(snapshots).filteredOn(s -> s.getMediaId().equals("r1"))
 			.singleElement()
 			.satisfies(s -> {
+				assertThat(s.getAccountIgId()).isEqualTo("900");
 				assertThat(s.getViews()).isEqualTo(29624);
 				assertThat(s.getSkipRate()).isNull();
 				assertThat(s.getLikeCount()).isNull();
 			});
+	}
+
+	@Test
+	void 참고_계정_수집_중_예상하지_못한_오류가_나도_내_계정_분석은_완료된다() {
+		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 1, Instant.now()));
+		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any()))
+			.willThrow(new IllegalStateException("예상 못한 오류"));
+
+		AnalysisResponse response = analysisService.request("100");
+
+		assertThat(response.status()).isEqualTo(AnalysisStatus.DONE);
+		assertThat(response.references()).singleElement()
+			.satisfies(r -> assertThat(r.failureType()).isEqualTo("UNEXPECTED"));
 	}
 
 	@Test

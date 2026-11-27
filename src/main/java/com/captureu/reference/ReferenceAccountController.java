@@ -3,6 +3,7 @@ package com.captureu.reference;
 import java.time.Instant;
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -52,6 +53,11 @@ class ReferenceAccountController {
 	@ExceptionHandler(AccountNotConnectedException.class)
 	ProblemDetail notConnected(AccountNotConnectedException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
+	@ExceptionHandler({ ReferenceUpdateInProgressException.class, DataIntegrityViolationException.class })
+	ProblemDetail conflict(RuntimeException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "참고 계정을 바꾸는 중이에요. 끝난 뒤 다시 시도해 주세요");
 	}
 
 	private String owner() {

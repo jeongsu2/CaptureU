@@ -64,28 +64,57 @@ class ReferenceAccountReaderTest {
 	}
 
 	@Test
-	void 최근_게시물을_커서로_넘기며_최대_개수까지_받는다() {
+	void next가_없어도_커서와_꽉_찬_페이지면_다음_페이지를_받는다() {
+		// 실제 Business Discovery 응답처럼 paging.next 없이 커서만 준다
 		server.expect(once(), requestTo(Matchers.allOf(Matchers.startsWith(OWNER_URL),
-				Matchers.containsString("business_discovery.username(ref.a)"), Matchers.containsString("media.limit(3)"))))
+				Matchers.containsString("business_discovery.username(ref.a)"), Matchers.containsString("media.limit(50)"))))
 			.andRespond(json("""
 					{"business_discovery":{"id":"900","username":"ref.a","followers_count":78958,"media_count":1152,
-					 "media":{"data":[%s,%s],"paging":{"cursors":{"after":"CUR1"},"next":"https://x?access_token=***"}}}}
-					""".formatted(reel("r1", 14728), feed("f1"))));
-		server.expect(once(), requestTo(Matchers.containsString("media.after(CUR1).limit(1)")))
+					 "media":{"data":[%s,%s,%s],"paging":{"cursors":{"after":"CUR1"}}}}}
+					""".formatted(reel("r1", 14728), feed("f1"), reels("p", 2, 49))));
+		server.expect(once(), requestTo(Matchers.containsString("media.after(CUR1).limit(10)")))
 			.andRespond(json("""
-					{"business_discovery":{"media":{"data":[%s],"paging":{"cursors":{"after":"CUR2"},"next":"n"}}}}
-					""".formatted(reel("r2", 29624))));
+					{"business_discovery":{"media":{"data":[%s],"paging":{"cursors":{"after":"CUR2"}}}}}
+					""".formatted(reels("q", 0, 9))));
 		ReadContext ctx = new ReadContext();
 
-		ReferenceAccountData data = reader.read("100", "ref.a", 3, ctx);
+		ReferenceAccountData data = reader.read("100", "ref.a", 60, ctx);
 
 		assertThat(data.profile().igId()).isEqualTo("900");
 		assertThat(data.profile().followersCount()).isEqualTo(78958);
-		assertThat(data.media()).extracting(m -> m.item().id()).containsExactly("r1", "f1", "r2");
+		assertThat(data.media()).hasSize(60);
+		assertThat(data.media()).extracting(m -> m.item().id()).startsWith("r1", "f1").endsWith("q9");
 		assertThat(data.media().get(0).viewCount()).isEqualTo(14728);
 		assertThat(data.media().get(1).viewCount()).isNull();
 		assertThat(data.media().get(1).item().likeCount()).isNull();
 		assertThat(ctx.callCount()).isEqualTo(2);
+		server.verify();
+	}
+
+	@Test
+	void 새_게시물이_늘지_않으면_멈춘다() {
+		String fifty = reels("p", 0, 49);
+		server.expect(once(), requestTo(Matchers.startsWith(OWNER_URL)))
+			.andRespond(json("""
+					{"business_discovery":{"id":"900","media":{"data":[%s],"paging":{"cursors":{"after":"C1"}}}}}
+					""".formatted(fifty)));
+		server.expect(once(), requestTo(Matchers.containsString("media.after(C1)")))
+			.andRespond(json("""
+					{"business_discovery":{"media":{"data":[%s],"paging":{"cursors":{"after":"C2"}}}}}
+					""".formatted(fifty)));
+
+		assertThat(reader.read("100", "ref.a", 100, new ReadContext()).media()).hasSize(50);
+		server.verify();
+	}
+
+	@Test
+	void 커서_형식이_이상하면_다음_페이지를_받지_않는다() {
+		server.expect(once(), requestTo(Matchers.startsWith(OWNER_URL)))
+			.andRespond(json("""
+					{"business_discovery":{"id":"900","media":{"data":[%s],"paging":{"cursors":{"after":"a){id}"}}}}}
+					""".formatted(reels("p", 0, 49))));
+
+		assertThat(reader.read("100", "ref.a", 100, new ReadContext()).media()).hasSize(50);
 		server.verify();
 	}
 
@@ -116,6 +145,18 @@ class ReferenceAccountReaderTest {
 				{"id":"%s","media_type":"VIDEO","media_product_type":"REELS","timestamp":"2026-11-20T08:00:00+0000",
 				 "caption":"제발.. 의견 주세요","thumbnail_url":"https://t","permalink":"https://p","comments_count":17,"view_count":%d}
 				""".formatted(id, views);
+	}
+
+	/** prefix+from ~ prefix+to 릴스 JSON을 쉼표로 이어 붙인다. */
+	private static String reels(String prefix, int from, int to) {
+		StringBuilder sb = new StringBuilder();
+		for (int i = from; i <= to; i++) {
+			if (sb.length() > 0) {
+				sb.append(',');
+			}
+			sb.append(reel(prefix + i, 1000 + i));
+		}
+		return sb.toString();
 	}
 
 	private static String feed(String id) {

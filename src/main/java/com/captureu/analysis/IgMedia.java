@@ -90,6 +90,11 @@ public class IgMedia implements Persistable<String> {
 		this.lastSeenAt = now;
 	}
 
+	/** 내 계정에서 수집한 게시물이면 소유자를 내 계정으로 둔다. */
+	void claimOwner(String ownerIgUserId) {
+		this.ownerIgUserId = ownerIgUserId;
+	}
+
 	@Override
 	public boolean isNew() {
 		return isNew;
