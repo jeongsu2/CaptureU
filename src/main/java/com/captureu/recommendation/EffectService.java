@@ -86,10 +86,7 @@ public class EffectService {
 			if (mediaId.equals(adoption.getMatchedMediaId())) {
 				adoption.clearConfirmation();
 			}
-			AdoptionRejection.Key key = new AdoptionRejection.Key(adoptionId, mediaId);
-			if (!rejectionRepository.existsById(key)) {
-				rejectionRepository.save(new AdoptionRejection(adoptionId, mediaId, now));
-			}
+			rejectionRepository.insertIgnore(adoptionId, mediaId, now);
 			return;
 		}
 		OwnPost post = requireOwnPost(analysisId, mediaId);

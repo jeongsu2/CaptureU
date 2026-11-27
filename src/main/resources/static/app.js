@@ -20,7 +20,6 @@ function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
-  node.append(error);
   return node;
 }
 
@@ -278,6 +277,7 @@ function renderAdoption(a, analysisId) {
     row.append(postThumb(c.thumbnailUrl), info);
     node.append(row);
   }
+  node.append(error);
   return node;
 }
 

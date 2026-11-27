@@ -125,6 +125,12 @@ class EffectIntegrationTest {
 		mockMvc.perform(post("/api/adoptions/" + usedAsIs + "/match").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"analysisId\":%d,\"mediaId\":\"eff-c\",\"used\":false}".formatted(third)))
 			.andExpect(status().isNoContent());
+		// 같은 "아니에요"를 한 번 더 눌러도 오류 없이 한 행만 남는다
+		mockMvc.perform(post("/api/adoptions/" + usedAsIs + "/match").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"analysisId\":%d,\"mediaId\":\"eff-c\",\"used\":false}".formatted(third)))
+			.andExpect(status().isNoContent());
+		assertThat(jdbc.queryForObject("select count(*) from adoption_rejection where adoption_id = ?", Integer.class,
+				usedAsIs)).isEqualTo(2);
 		mockMvc.perform(get("/api/analyses/" + third + "/effects"))
 			.andExpect(jsonPath("$.adoptions[0].status").value("NOT_FOUND"));
 		// 조회는 저장하지 않는다
