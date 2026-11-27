@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +64,8 @@ class AnalysisServiceIntegrationTest {
 
 	@Autowired
 	ReferenceAccountRepository referenceRepository;
+	@Autowired
+	OutlierService outlierService;
 
 	@MockitoBean
 	InstagramAccountReader reader;
@@ -166,6 +169,54 @@ class AnalysisServiceIntegrationTest {
 		assertThat(response.status()).isEqualTo(AnalysisStatus.DONE);
 		assertThat(response.references()).singleElement()
 			.satisfies(r -> assertThat(r.failureType()).isEqualTo("UNEXPECTED"));
+	}
+
+	@Test
+	void 분석이_끝나면_내_계정과_참고_계정별_아웃라이어를_계산한다() throws Exception {
+		Instant old = Instant.now().minusSeconds(30L * 24 * 3600);
+		List<MediaItem> mine = new ArrayList<>();
+		int[] views = { 1000, 1200, 900, 1100, 5000 };
+		for (int i = 0; i < views.length; i++) {
+			MediaItem item = new MediaItem("o" + i, "VIDEO", "REELS", old, "c", "https://t", null, "p", 1, 10);
+			mine.add(item);
+			given(reader.readInsights(eq(item), any()))
+				.willReturn(new MediaInsights(views[i], null, null, null, null, null, 50.0, null));
+		}
+		given(reader.readAllMedia(eq("100"), any())).willReturn(mine);
+		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 1, old));
+		List<ReferenceMedia> refMedia = new ArrayList<>();
+		int[] refViews = { 100_000, 120_000, 90_000, 400_000, 110_000 };
+		for (int i = 0; i < refViews.length; i++) {
+			refMedia.add(new ReferenceMedia(new MediaItem("x" + i, "VIDEO", "REELS", old, "c", "https://t", null, "p",
+					null, 5), refViews[i]));
+		}
+		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any()))
+			.willReturn(new ReferenceAccountData(new ReferenceProfile("900", "ref.a", 1, 1), refMedia));
+
+		Long id = analysisService.request("100").id();
+		OutlierService.AnalysisOutliers result = outlierService.compute(id);
+
+		assertThat(result.own().outliers().medianViews()).isEqualTo(1100);
+		assertThat(result.own().outliers().outliers()).extracting(OutlierCalculator.ScoredPost::mediaId)
+			.containsExactly("o4");
+		assertThat(result.references()).singleElement().satisfies(r -> {
+			assertThat(r.username()).isEqualTo("ref.a");
+			assertThat(r.outliers().medianViews()).isEqualTo(110_000);
+			assertThat(r.outliers().outliers()).extracting(OutlierCalculator.ScoredPost::mediaId)
+				.containsExactly("x3");
+		});
+		mockMvc.perform(get("/api/analyses/" + id + "/outliers"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.own.outliers.medianViews").value(1100.0));
+	}
+
+	@Test
+	void 실패한_분석의_아웃라이어는_409() throws Exception {
+		given(reader.readAllMedia(eq("100"), any()))
+			.willThrow(new GraphApiException(GraphApiErrorType.TOKEN_INVALID, 400, 190, 464, "x"));
+		Long id = analysisService.request("100").id();
+
+		mockMvc.perform(get("/api/analyses/" + id + "/outliers")).andExpect(status().isConflict());
 	}
 
 	@Test
