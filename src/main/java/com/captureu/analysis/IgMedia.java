@@ -6,7 +6,12 @@ import org.springframework.data.domain.Persistable;
 
 import com.captureu.instagram.account.MediaItem;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.PostLoad;
@@ -50,6 +55,23 @@ public class IgMedia implements Persistable<String> {
 	@Column(length = 500)
 	private String captionFirstLine;
 
+	/** 첫 줄에서 광고 표시·행동 유도 머리말·끝 해시태그를 뗀 진짜 후킹 문장 (#12). */
+	@Column(length = 500)
+	private String captionHook;
+
+	@Enumerated(EnumType.STRING)
+	@JdbcTypeCode(SqlTypes.VARCHAR)
+	@Column(length = 20)
+	private CaptionHook.HookType hookType;
+
+	/** 광고·협찬 표시가 있는지. 광고 게시물은 성과가 다를 수 있어 따로 본다. */
+	private boolean adDisclosure;
+
+	@Enumerated(EnumType.STRING)
+	@JdbcTypeCode(SqlTypes.VARCHAR)
+	@Column(length = 20)
+	private CaptionHook.CallToAction callToAction;
+
 	@Column(length = 2048)
 	private String thumbnailUrl;
 
@@ -84,6 +106,11 @@ public class IgMedia implements Persistable<String> {
 		this.postedAt = item.postedAt();
 		this.caption = item.caption();
 		this.captionFirstLine = CaptionText.firstLine(item.caption());
+		CaptionHook hook = CaptionHook.parse(this.captionFirstLine);
+		this.captionHook = hook.hookText();
+		this.hookType = hook.type();
+		this.adDisclosure = hook.adDisclosure();
+		this.callToAction = hook.callToAction();
 		this.thumbnailUrl = item.coverImageUrl();
 		this.thumbnailUrlExpiresAt = CdnUrls.expiresAt(this.thumbnailUrl).orElse(null);
 		this.permalink = item.permalink();

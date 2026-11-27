@@ -115,6 +115,9 @@ class AnalysisServiceIntegrationTest {
 
 		IgMedia saved = mediaRepository.findById("m1").orElseThrow();
 		assertThat(saved.getCaptionFirstLine()).isEqualTo("#광고 첫 줄");
+		// 첫 줄 전처리 (#12): 광고 표시를 떼고 기록
+		assertThat(saved.getCaptionHook()).isEqualTo("첫 줄");
+		assertThat(saved.isAdDisclosure()).isTrue();
 		assertThat(saved.getThumbnailUrlExpiresAt()).isNotNull();
 		assertThat(mediaRepository.findById("m2").orElseThrow().getThumbnailUrl()).isEqualTo("https://cdn/i.jpg");
 
@@ -241,6 +244,12 @@ class AnalysisServiceIntegrationTest {
 			assertThat(card.thumbnailUrl()).isEqualTo("https://t");
 		});
 		assertThat(report.ownSummary().medianSkipRate()).isEqualTo(50.0);
+		// 첫 줄 유형별 통계 (#12): 판정한 5개 중 아웃라이어 1개
+		assertThat(report.own().hookTypes()).singleElement().satisfies(s -> {
+			assertThat(s.count()).isEqualTo(5);
+			assertThat(s.outlierCount()).isEqualTo(1);
+			assertThat(s.outlierRate()).isEqualTo(20.0);
+		});
 		// 참고 계정이 권장(3개)보다 적으면 치우칠 수 있다고 표시
 		assertThat(report.fewReferences()).isTrue();
 		assertThat(report.references()).singleElement().satisfies(r -> {
