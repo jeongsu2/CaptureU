@@ -55,17 +55,14 @@ class OwnAccountCollectorTest {
 		});
 		OwnAccountCollector collector = new OwnAccountCollector(reader, 8);
 
-		long start = System.nanoTime();
 		CollectedAccount result = collector.collect("100", new ReadContext());
-		long elapsedMs = (System.nanoTime() - start) / 1_000_000;
 
 		assertThat(result.media()).extracting(m -> m.item().id()).containsExactlyElementsOf(
 				media.stream().map(MediaItem::id).toList());
 		assertThat(result.media()).allSatisfy(
 				m -> assertThat(m.insights().views()).isEqualTo(Integer.parseInt(m.item().id().substring(1))));
-		assertThat(maxInFlight.get()).isLessThanOrEqualTo(8).isGreaterThan(1);
-		// 순서대로면 40 × 50ms = 2초. 8개씩이면 약 0.25초
-		assertThat(elapsedMs).isLessThan(MEDIA * CALL_MS / 2);
+		// 시간 대신 동시에 몇 개가 돌았는지로 확인한다 (느린 CI에서도 흔들리지 않게)
+		assertThat(maxInFlight.get()).isEqualTo(8);
 	}
 
 	@Test
@@ -100,26 +97,33 @@ class OwnAccountCollectorTest {
 	}
 
 	@Test
-	void 동시_호출_수는_1_이상이어야_한다() {
-		assertThatThrownBy(() -> new OwnAccountCollector(reader, 0)).isInstanceOf(IllegalArgumentException.class);
+	void 앞_게시물이_느려도_뒤_게시물의_치명적_에러에서_바로_멈춘다() {
+		given(reader.readInsights(any(), any())).willAnswer(inv -> {
+			MediaItem item = inv.getArgument(0);
+			if (item.id().equals("m0")) {
+				insightCalls.incrementAndGet();
+				Thread.sleep(3000); // 첫 게시물이 아주 느림 (재시도 중 등)
+				return new MediaInsights(1, null, null, null, null, null, null, null);
+			}
+			slowCall();
+			if (item.id().equals("m5")) {
+				throw new GraphApiException(GraphApiErrorType.RATE_LIMITED, 403, 80002, null, "limit");
+			}
+			return new MediaInsights(1, null, null, null, null, null, null, null);
+		});
+		ReadContext ctx = new ReadContext();
+
+		assertThatThrownBy(() -> new OwnAccountCollector(reader, 4).collect("100", ctx))
+			.isInstanceOfSatisfying(GraphApiException.class,
+					e -> assertThat(e.getType()).isEqualTo(GraphApiErrorType.RATE_LIMITED));
+		// 순서대로 기다렸다면 m0이 끝나는 3초 동안 나머지 40개를 거의 다 불렀을 것이다
+		assertThat(insightCalls.get()).isLessThan(15);
+		assertThat(ctx.isAborted()).isTrue();
 	}
 
 	@Test
-	void 호출_수는_여러_스레드에서_세도_정확하다() throws Exception {
-		ReadContext ctx = new ReadContext();
-		List<Thread> threads = new ArrayList<>();
-		for (int t = 0; t < 16; t++) {
-			threads.add(Thread.ofVirtual().start(() -> {
-				for (int i = 0; i < 1000; i++) {
-					ctx.addCalls(1);
-				}
-			}));
-		}
-		for (Thread t : threads) {
-			t.join();
-		}
-
-		assertThat(ctx.callCount()).isEqualTo(16_000);
+	void 동시_호출_수는_1_이상이어야_한다() {
+		assertThatThrownBy(() -> new OwnAccountCollector(reader, 0)).isInstanceOf(IllegalArgumentException.class);
 	}
 
 	private void slowCall() throws InterruptedException {

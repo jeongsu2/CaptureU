@@ -106,7 +106,7 @@ public class InstagramAccountReader {
 			return MediaInsights.from(parseMetricValues(node));
 		}
 		catch (GraphApiException e) {
-			throwIfFatal(e);
+			throwIfFatal(e, ctx);
 			if (e.getType() != GraphApiErrorType.INVALID_REQUEST || requested.size() == 1) {
 				return MediaInsights.failed(e.getDetail());
 			}
@@ -114,30 +114,41 @@ public class InstagramAccountReader {
 		}
 	}
 
+	/**
+	 * 지표별로 다시 받는다. 인사이트를 병렬로 받으므로 다른 게시물이 그사이 "지원 안 됨"으로 기록한 지표는 건너뛰고,
+	 * 이 게시물에서 다른 지표를 하나라도 받은 순간 거부된 지표를 바로 기록해 다른 스레드가 같은 호출을 반복하지 않게 한다.
+	 */
 	private MediaInsights readInsightsOneByOne(MediaItem media, List<String> metrics, ReadContext ctx) {
 		Map<String, Number> values = new LinkedHashMap<>();
 		List<String> rejected = new ArrayList<>();
 		String lastError = null;
 		for (String metric : metrics) {
+			if (ctx.isUnsupported(media, metric)) {
+				continue;
+			}
 			try {
 				values.putAll(parseMetricValues(get(ctx, media.id() + "/insights", Map.of("metric", metric))));
 			}
 			catch (GraphApiException e) {
-				throwIfFatal(e);
+				throwIfFatal(e, ctx);
 				lastError = e.getDetail();
 				if (e.getType() == GraphApiErrorType.INVALID_REQUEST) {
 					rejected.add(metric);
 				}
 			}
+			if (!values.isEmpty()) {
+				markUnsupported(media, rejected, ctx);
+				rejected.clear();
+			}
 		}
-		if (values.isEmpty()) {
-			return MediaInsights.failed(lastError);
-		}
-		for (String metric : rejected) {
+		return values.isEmpty() ? MediaInsights.failed(lastError) : MediaInsights.from(values);
+	}
+
+	private static void markUnsupported(MediaItem media, List<String> metrics, ReadContext ctx) {
+		for (String metric : metrics) {
 			ctx.markUnsupported(media, metric);
 			log.info("{}/{} 게시물에서 지원하지 않는 지표로 기록: {}", media.productType(), media.mediaType(), metric);
 		}
-		return MediaInsights.from(values);
 	}
 
 	/** 팔로워 연령·성별, 참여자 연령. 팔로워·참여가 100 미만이면 Meta가 주지 않으므로 빈 결과일 수 있다. */
@@ -164,18 +175,20 @@ public class InstagramAccountReader {
 			}
 		}
 		catch (GraphApiException e) {
-			throwIfFatal(e);
+			throwIfFatal(e, ctx);
 			log.info("연령대 {}/{} 를 받지 못함: {}", metric, breakdown, e.getDetail());
 		}
 	}
 
 	private JsonNode get(ReadContext ctx, String path, Map<String, String> params) {
-		ctx.countCall();
+		ctx.beforeCall();
 		return client.get(path, params);
 	}
 
-	private static void throwIfFatal(GraphApiException e) {
+	/** 분석 전체를 멈춰야 하는 에러면 같은 분석의 다른 스레드도 멈추도록 신호를 남기고 던진다. */
+	private static void throwIfFatal(GraphApiException e, ReadContext ctx) {
 		if (FATAL.contains(e.getType())) {
+			ctx.abort(e);
 			throw e;
 		}
 	}

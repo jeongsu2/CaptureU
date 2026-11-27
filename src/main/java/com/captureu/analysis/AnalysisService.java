@@ -5,11 +5,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 import jakarta.annotation.PreDestroy;
 
@@ -107,18 +110,22 @@ public class AnalysisService {
 		ReadContext ctx = new ReadContext();
 		try {
 			Instant collectedAt = Instant.now(clock);
-			// 참고 계정은 내 계정과 서로 기다릴 이유가 없으므로 동시에 모은다 (#30)
-			CompletableFuture<List<CollectedReference>> referencesFuture = CompletableFuture
-				.supplyAsync(() -> referenceCollector.collect(igUserId, ctx), backgroundExecutor);
+			// 참고 계정은 내 계정과 서로 기다릴 이유가 없으므로 동시에 모은다 (#30).
+			// submit이 돌려주는 Future는 cancel(true) 시 실제로 스레드를 중단시킨다 (CompletableFuture는 중단하지 않음)
+			Future<List<CollectedReference>> referencesFuture = backgroundExecutor
+				.submit(() -> referenceCollector.collect(igUserId, ctx));
 			CollectedAccount own;
 			try {
 				own = collector.collect(igUserId, ctx);
 			}
 			catch (RuntimeException | Error e) {
+				// 같은 분석의 참고 계정 수집도 다음 호출 전에 멈추고, 실패를 기록하기 전에 잠깐 끝나기를 기다린다
+				ctx.abort(e instanceof RuntimeException r ? r : new IllegalStateException(e));
 				referencesFuture.cancel(true);
+				awaitQuietly(referencesFuture);
 				throw e;
 			}
-			List<CollectedReference> references = join(referencesFuture);
+			List<CollectedReference> references = await(referencesFuture);
 			analysis = writer.complete(analysis.getId(), own, references, ctx.callCount(), collectedAt,
 					Instant.now(clock));
 			log.info("분석 {} 완료: 게시물 {}개, 인사이트 실패 {}개, 참고 계정 {}개, 외부 호출 {}회, {}ms", analysis.getId(),
@@ -127,14 +134,17 @@ public class AnalysisService {
 		}
 		catch (GraphApiException e) {
 			String message = "code=%s subcode=%s: %s".formatted(e.getCode(), e.getSubcode(), e.getDetail());
-			analysis = writer.fail(analysis.getId(), e.getType().name(), message, ctx.callCount(), Instant.now(clock));
+			Long id = analysis.getId();
+			analysis = withoutInterrupt(
+					() -> writer.fail(id, e.getType().name(), message, ctx.callCount(), Instant.now(clock)));
 			log.warn("분석 {} 실패: {}", analysis.getId(), e.getMessage());
 		}
 		catch (Throwable e) {
 			// 예상하지 못한 오류(Error 포함)여도 분석이 '수집 중'으로 남지 않게 실패로 기록하고 원래 예외를 올린다
+			Long id = analysis.getId();
 			try {
-				writer.fail(analysis.getId(), "UNEXPECTED", e.getClass().getSimpleName(), ctx.callCount(),
-						Instant.now(clock));
+				withoutInterrupt(() -> writer.fail(id, "UNEXPECTED", e.getClass().getSimpleName(), ctx.callCount(),
+						Instant.now(clock)));
 			}
 			catch (RuntimeException writeFailure) {
 				e.addSuppressed(writeFailure);
@@ -144,13 +154,33 @@ public class AnalysisService {
 		return toResponse(analysis);
 	}
 
-	/** CompletableFuture가 감싼 예외를 풀어 원래 예외(GraphApiException 등)로 올린다. */
-	private static <T> T join(CompletableFuture<T> future) {
+	/**
+	 * 스레드 중단 표시가 남아 있으면 DB 연결을 얻는 중에 실패할 수 있다.
+	 * 실패 기록은 꼭 남아야 하므로 표시를 잠시 지웠다가 되돌린다.
+	 */
+	private static <T> T withoutInterrupt(Supplier<T> action) {
+		boolean interrupted = Thread.interrupted();
 		try {
-			return future.join();
+			return action.get();
 		}
-		catch (CompletionException | CancellationException e) {
-			Throwable cause = e.getCause() != null ? e.getCause() : e;
+		finally {
+			if (interrupted) {
+				Thread.currentThread().interrupt();
+			}
+		}
+	}
+
+	/** Future가 감싼 예외를 풀어 원래 예외(GraphApiException 등)로 올린다. */
+	private static <T> T await(Future<T> future) {
+		try {
+			return future.get();
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("참고 계정 수집을 기다리는 중 스레드가 중단됨", e);
+		}
+		catch (ExecutionException e) {
+			Throwable cause = e.getCause();
 			if (cause instanceof RuntimeException r) {
 				throw r;
 			}
@@ -158,6 +188,19 @@ public class AnalysisService {
 				throw err;
 			}
 			throw new IllegalStateException(cause);
+		}
+	}
+
+	/** 취소한 작업이 끝나기를 잠깐 기다린다. 결과나 예외는 무시한다. */
+	private static void awaitQuietly(Future<?> future) {
+		try {
+			future.get(2, TimeUnit.SECONDS);
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+		catch (ExecutionException | CancellationException | TimeoutException ignored) {
+			// 취소했거나 실패했거나 아직 안 끝난 작업
 		}
 	}
 

@@ -43,17 +43,21 @@ class ReferenceCollector {
 	List<CollectedReference> collect(String ownerIgUserId, ReadContext ctx) {
 		List<CollectedReference> results = new ArrayList<>();
 		for (ReferenceAccount reference : referenceRepository.findByOwnerIgUserIdOrderByIdAsc(ownerIgUserId)) {
+			// 내 계정 쪽에서 분석을 멈췄으면 남은 참고 계정은 부르지 않는다
+			ctx.throwIfAborted();
 			String username = reference.getUsername();
-			// 내 계정 수집과 동시에 돌므로, 참고 계정마다 호출 수를 따로 세고 끝에 합친다
-			ReadContext refCtx = new ReadContext();
+			// 내 계정 수집과 동시에 돈다. 참고 계정마다 호출 수를 따로 세면서 전체에도 바로 더한다
+			ReadContext refCtx = ctx.child();
 			long start = System.nanoTime();
 			try {
 				ReferenceAccountData data = reader.read(ownerIgUserId, username, maxMedia, refCtx);
 				results.add(new CollectedReference(username, data, null, null, refCtx.callCount(), elapsedMs(start)));
 			}
 			catch (GraphApiException e) {
-				if (e.getType() == GraphApiErrorType.TOKEN_INVALID || e.getType() == GraphApiErrorType.RATE_LIMITED) {
-					ctx.addCalls(refCtx.callCount());
+				if (ctx.isAborted() || e.getType() == GraphApiErrorType.TOKEN_INVALID
+						|| e.getType() == GraphApiErrorType.RATE_LIMITED) {
+					// 같은 토큰·한도를 쓰는 내 계정 수집도 멈추도록 신호를 남긴다
+					ctx.abort(e);
 					throw e;
 				}
 				log.info("참고 계정 @{} 수집 실패: {}", username, e.getMessage());
@@ -62,12 +66,15 @@ class ReferenceCollector {
 						refCtx.callCount(), elapsedMs(start)));
 			}
 			catch (RuntimeException e) {
+				// 분석이 멈췄거나 스레드가 중단된 경우는 이 참고 계정만의 실패가 아니므로 그대로 올린다
+				if (ctx.isAborted() || Thread.currentThread().isInterrupted()) {
+					throw e;
+				}
 				// 참고 계정 하나 때문에 내 계정 분석까지 버리지 않는다
 				log.warn("참고 계정 @{} 수집 중 예상하지 못한 오류", username, e);
 				results.add(new CollectedReference(username, null, "UNEXPECTED", e.getClass().getSimpleName(),
 						refCtx.callCount(), elapsedMs(start)));
 			}
-			ctx.addCalls(refCtx.callCount());
 		}
 		return results;
 	}

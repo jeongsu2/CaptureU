@@ -161,6 +161,19 @@ class AnalysisServiceIntegrationTest {
 	}
 
 	@Test
+	void 참고_계정에서_토큰이_무효가_되면_다른_스레드에서_나도_분석은_그_원인으로_실패한다() {
+		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 1, Instant.now()));
+		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any()))
+			.willThrow(new GraphApiException(GraphApiErrorType.TOKEN_INVALID, 400, 190, 464, "Sessions not allowed"));
+
+		AnalysisResponse response = analysisService.request("100");
+
+		assertThat(response.status()).isEqualTo(AnalysisStatus.FAILED);
+		assertThat(response.failureType()).isEqualTo("TOKEN_INVALID");
+		assertThat(analysisRepository.findByStatus(AnalysisStatus.COLLECTING)).isEmpty();
+	}
+
+	@Test
 	void 참고_계정_수집_중_예상하지_못한_오류가_나도_내_계정_분석은_완료된다() {
 		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 1, Instant.now()));
 		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any()))
