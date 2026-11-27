@@ -109,6 +109,14 @@ curl -X POST http://localhost:8080/api/analyses/{id}/recommendations -H 'Content
 curl -X POST http://localhost:8080/api/recommendations/{추천 id}/adoptions -H 'Content-Type: application/json' -d '{"hookIndex":0}'
 ```
 
+7. 올린 뒤 다시 분석하면 추천 효과를 본다
+
+```bash
+curl http://localhost:8080/api/analyses/{id}/effects
+```
+
+새 게시물 캡션 첫 줄을 채택 문구와 비교해(공백·기호를 뺀 글자 2개 묶음이 겹치는 정도) 충분히 비슷하면 자동으로 연결하고, 애매하면 "이 게시물에 썼나요?"로 묻는다 (`POST /api/adoptions/{id}/match`). 연결한 게시물 중 게시 7일이 지난 것의 스킵률·저장률·조회수를 내 중앙값과 비교한다. 주제·시기도 다르므로 차이를 추천 효과로 단정하지 않는다는 안내를 함께 보여 준다.
+
 ## 진행
 
 작업은 [Issues](../../issues)와 [Milestones](../../milestones)로 관리한다.

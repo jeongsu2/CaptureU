@@ -109,6 +109,18 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .hook .adopt { padding: 6px 10px; font-size: 13px; white-space: nowrap; }
 .hook.adopted { border-color: var(--accent); }
 .features { margin: 0 0 12px; padding-left: 18px; font-size: 14px; }
+.effect-head { font-weight: 700; font-size: 16px; margin: 4px 0 8px; }
+.adoption { border-top: 1px solid var(--line); padding: 12px 0 0; margin-top: 12px; }
+.adoption .quote { font-weight: 600; }
+.adoption .state { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--chip); margin-left: 6px; }
+.matched { display: flex; gap: 10px; margin-top: 8px; align-items: flex-start; }
+.matched img { width: 72px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; background: var(--chip); flex-shrink: 0; }
+.matched .info { font-size: 13px; flex: 1; min-width: 0; }
+.matched .info p { margin: 0 0 4px; }
+.better { color: var(--good); font-weight: 600; }
+.worse { color: var(--accent); font-weight: 600; }
+.actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.actions button { padding: 6px 10px; font-size: 13px; }
 .notes { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 
 /* 좁은 화면: 첫 줄 문구를 한 줄 전체로 쓰고 유형·버튼은 아래 줄로 */
