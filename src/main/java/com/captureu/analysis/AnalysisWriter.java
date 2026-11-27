@@ -1,8 +1,12 @@
 package com.captureu.analysis;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -10,7 +14,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.captureu.analysis.OwnAccountCollector.CollectedAccount;
-import com.captureu.analysis.OwnAccountCollector.CollectedMedia;
+import com.captureu.analysis.ReferenceCollector.CollectedReference;
+import com.captureu.instagram.account.MediaItem;
+import com.captureu.instagram.account.ReferenceAccountReader.ReferenceMedia;
 
 /** 수집한 데이터를 한 트랜잭션으로 저장한다. */
 @Component
@@ -23,15 +29,18 @@ class AnalysisWriter {
 	private final IgMediaRepository mediaRepository;
 	private final MediaMetricSnapshotRepository snapshotRepository;
 	private final AudienceDemographicRepository demographicRepository;
+	private final AnalysisReferenceRepository analysisReferenceRepository;
 
 	AnalysisWriter(AnalysisRepository analysisRepository, AccountSnapshotRepository accountSnapshotRepository,
 			IgMediaRepository mediaRepository, MediaMetricSnapshotRepository snapshotRepository,
-			AudienceDemographicRepository demographicRepository) {
+			AudienceDemographicRepository demographicRepository,
+			AnalysisReferenceRepository analysisReferenceRepository) {
 		this.analysisRepository = analysisRepository;
 		this.accountSnapshotRepository = accountSnapshotRepository;
 		this.mediaRepository = mediaRepository;
 		this.snapshotRepository = snapshotRepository;
 		this.demographicRepository = demographicRepository;
+		this.analysisReferenceRepository = analysisReferenceRepository;
 	}
 
 	@Transactional
@@ -40,26 +49,57 @@ class AnalysisWriter {
 	}
 
 	@Transactional
-	Analysis complete(Long analysisId, CollectedAccount data, int apiCallCount, Instant collectedAt, Instant now) {
+	Analysis complete(Long analysisId, CollectedAccount own, List<CollectedReference> references, int apiCallCount,
+			Instant collectedAt, Instant now) {
 		Analysis analysis = analysisRepository.findById(analysisId).orElseThrow();
 		String owner = analysis.getIgUserId();
 
-		accountSnapshotRepository.save(new AccountSnapshot(analysisId, owner, data.account().username(),
-				data.account().followersCount(), data.account().reportedMediaCount()));
+		accountSnapshotRepository.save(new AccountSnapshot(analysisId, owner, own.account().username(),
+				own.account().followersCount(), own.account().reportedMediaCount()));
 
-		upsertMedia(owner, data.media(), now);
+		// 게시물 행은 하나지만, 지표 스냅샷은 "어느 계정의 게시물로 수집했는지"별로 따로 저장한다.
+		// 협업 게시물은 내 계정과 참고 계정 모두의 게시물로 오므로 두 계정 비교에 모두 들어가야 한다.
+		Map<String, OwnedMedia> mediaById = new LinkedHashMap<>();
+		List<MediaMetricSnapshot> snapshots = new ArrayList<>();
+		Set<String> ownSeen = new HashSet<>();
+		for (var m : own.media()) {
+			if (ownSeen.add(m.item().id())) {
+				mediaById.put(m.item().id(), new OwnedMedia(owner, m.item(), true));
+				snapshots.add(MediaMetricSnapshot.of(analysisId, owner, m.item(), m.insights(), collectedAt));
+			}
+		}
 
-		snapshotRepository.saveAll(data.media()
-			.stream()
-			.map(m -> MediaMetricSnapshot.of(analysisId, m.item(), m.insights(), collectedAt))
-			.toList());
+		List<AnalysisReference> referenceResults = new ArrayList<>();
+		for (CollectedReference ref : references) {
+			if (!ref.succeeded()) {
+				referenceResults.add(AnalysisReference.failed(analysisId, ref.username(), ref.failureType(),
+						ref.failureMessage(), ref.apiCallCount(), ref.durationMs()));
+				continue;
+			}
+			var profile = ref.data().profile();
+			String account = referenceAccountId(profile.igId(), ref.username());
+			Set<String> refSeen = new HashSet<>();
+			for (ReferenceMedia rm : ref.data().media()) {
+				if (refSeen.add(rm.item().id())) {
+					mediaById.putIfAbsent(rm.item().id(), new OwnedMedia(account, rm.item(), false));
+					snapshots.add(
+							MediaMetricSnapshot.ofReference(analysisId, account, rm.item(), rm.viewCount(), collectedAt));
+				}
+			}
+			referenceResults.add(AnalysisReference.done(analysisId, ref.username(), profile.igId(),
+					profile.followersCount(), refSeen.size(), ref.apiCallCount(), ref.durationMs()));
+		}
+		List<OwnedMedia> allMedia = new ArrayList<>(mediaById.values());
 
-		demographicRepository.saveAll(data.demographics()
+		upsertMedia(allMedia, now);
+		snapshotRepository.saveAll(snapshots);
+		analysisReferenceRepository.saveAll(referenceResults);
+		demographicRepository.saveAll(own.demographics()
 			.stream()
 			.map(row -> AudienceDemographic.of(analysisId, row))
 			.toList());
 
-		analysis.complete(data.media().size(), data.mediaTruncated(), data.insightFailedCount(), apiCallCount, now);
+		analysis.complete(own.media().size(), own.mediaTruncated(), own.insightFailedCount(), apiCallCount, now);
 		return analysis;
 	}
 
@@ -81,7 +121,7 @@ class AnalysisWriter {
 		return stale.size();
 	}
 
-	private void upsertMedia(String owner, List<CollectedMedia> collected, Instant now) {
+	private void upsertMedia(List<OwnedMedia> collected, Instant now) {
 		List<String> ids = collected.stream().map(m -> m.item().id()).toList();
 		Map<String, IgMedia> existing = mediaRepository.findAllById(ids)
 			.stream()
@@ -89,11 +129,23 @@ class AnalysisWriter {
 		List<IgMedia> toSave = collected.stream().map(m -> {
 			IgMedia media = existing.get(m.item().id());
 			if (media == null) {
-				return IgMedia.from(owner, m.item(), now);
+				return IgMedia.from(m.owner(), m.item(), now);
 			}
 			media.update(m.item(), now);
+			// 참고 계정을 통해 먼저 저장된 게시물이 사실 내 게시물이면 소유자를 바로잡는다 (협업 게시물 등)
+			if (m.mine()) {
+				media.claimOwner(m.owner());
+			}
 			return media;
 		}).toList();
 		mediaRepository.saveAll(toSave);
+	}
+
+	/** 참고 계정 ID가 응답에 없으면 아이디로 구분한다. */
+	static String referenceAccountId(String igId, String username) {
+		return igId != null ? igId : "@" + username;
+	}
+
+	private record OwnedMedia(String owner, MediaItem item, boolean mine) {
 	}
 }

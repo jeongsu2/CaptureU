@@ -19,6 +19,9 @@ public final class GraphApiErrorClassifier {
 	/** 100번 중 "객체가 없거나 권한이 없음". */
 	private static final int SUBCODE_OBJECT_NOT_FOUND = 33;
 
+	/** Business Discovery에서 개인 계정이거나 없는 아이디. 코드가 110이 아니어도 이 서브코드면 대상 없음으로 본다. */
+	private static final int SUBCODE_USER_NOT_FOUND = 2207013;
+
 	private GraphApiErrorClassifier() {
 	}
 
@@ -36,6 +39,9 @@ public final class GraphApiErrorClassifier {
 			}
 			if (TOKEN_INVALID_CODES.contains(code)) {
 				return GraphApiErrorType.TOKEN_INVALID;
+			}
+			if (subcode != null && subcode == SUBCODE_USER_NOT_FOUND) {
+				return GraphApiErrorType.TARGET_NOT_FOUND;
 			}
 			if (TEMPORARY_CODES.contains(code) || isTransient) {
 				return GraphApiErrorType.TEMPORARY;

@@ -21,6 +21,7 @@ class GraphApiErrorClassifierTest {
 			"400, 10,    null,    PERMISSION_DENIED",
 			"400, 200,   null,    PERMISSION_DENIED",
 			"400, 110,   2207013, TARGET_NOT_FOUND",
+			"400, 100,   2207013, TARGET_NOT_FOUND",
 			"400, 100,   33,      TARGET_NOT_FOUND",
 			"400, 100,   null,    INVALID_REQUEST",
 			"400, 9999,  null,    UNKNOWN" })

@@ -3,6 +3,7 @@ package com.captureu.analysis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -29,8 +30,14 @@ import com.captureu.instagram.account.DemographicRow;
 import com.captureu.instagram.account.InstagramAccountReader;
 import com.captureu.instagram.account.MediaInsights;
 import com.captureu.instagram.account.MediaItem;
+import com.captureu.instagram.account.ReferenceAccountReader;
+import com.captureu.instagram.account.ReferenceAccountReader.ReferenceAccountData;
+import com.captureu.instagram.account.ReferenceAccountReader.ReferenceMedia;
+import com.captureu.instagram.account.ReferenceAccountReader.ReferenceProfile;
 import com.captureu.instagram.graph.GraphApiErrorType;
 import com.captureu.instagram.graph.GraphApiException;
+import com.captureu.reference.ReferenceAccount;
+import com.captureu.reference.ReferenceAccountRepository;
 
 /** 실제 MySQL(Testcontainers)에 저장되는지 확인한다. 외부 API는 가짜로 바꾼다. */
 @Import(TestcontainersConfiguration.class)
@@ -54,8 +61,13 @@ class AnalysisServiceIntegrationTest {
 	@Autowired
 	AnalysisWriter writer;
 
+	@Autowired
+	ReferenceAccountRepository referenceRepository;
+
 	@MockitoBean
 	InstagramAccountReader reader;
+	@MockitoBean
+	ReferenceAccountReader referenceReader;
 
 	private final MediaItem reel = new MediaItem("m1", "VIDEO", "REELS", Instant.parse("2026-11-27T00:00:00Z"),
 			"#광고 첫 줄\n둘째 줄", "https://cdn/t.jpg?oe=6750A000", null, "https://p/1", 46, 57);
@@ -66,6 +78,7 @@ class AnalysisServiceIntegrationTest {
 	void setUp() {
 		snapshotRepository.deleteAll();
 		demographicRepository.deleteAll();
+		referenceRepository.deleteAll();
 		given(reader.readAccount(eq("100"), any())).willReturn(new AccountInfo("100", "tester", 19664, 44));
 		given(reader.readAllMedia(eq("100"), any())).willReturn(List.of(reel, feed));
 		given(reader.readInsights(eq(reel), any()))
@@ -102,6 +115,57 @@ class AnalysisServiceIntegrationTest {
 				assertThat(s.getAgeHours()).isGreaterThan(0);
 			});
 		assertThat(demographicRepository.findByAnalysisId(response.id())).hasSize(1);
+	}
+
+	@Test
+	void 참고_계정도_같은_형태로_저장하고_하나가_실패해도_분석은_완료된다() {
+		Instant now = Instant.parse("2026-11-28T00:00:00Z");
+		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 78958, now));
+		referenceRepository.save(new ReferenceAccount("100", "ref.b", "901", 140058, now));
+		MediaItem refReel = new MediaItem("r1", "VIDEO", "REELS", Instant.parse("2026-11-10T00:00:00Z"),
+				"제발.. 의견 주세요", "https://cdn/r.jpg", null, "https://p/r1", null, 17);
+		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any()))
+			.willReturn(new ReferenceAccountData(new ReferenceProfile("900", "ref.a", 78958, 1152),
+					List.of(new ReferenceMedia(refReel, 29624), new ReferenceMedia(reel, 1))));
+		given(referenceReader.read(eq("100"), eq("ref.b"), anyInt(), any()))
+			.willThrow(new GraphApiException(GraphApiErrorType.TARGET_NOT_FOUND, 400, 110, 2207013, "Invalid user id"));
+
+		AnalysisResponse response = analysisService.request("100");
+
+		assertThat(response.status()).isEqualTo(AnalysisStatus.DONE);
+		assertThat(response.references())
+			.extracting(r -> r.username() + ":" + r.status() + ":" + r.mediaCount() + ":" + r.apiCallCount())
+			// 협업 게시물(m1)은 내 계정과 참고 계정 모두의 게시물로 센다
+			.containsExactly("ref.a:DONE:2:0", "ref.b:FAILED:0:0");
+		assertThat(response.references()).allSatisfy(r -> assertThat(r.durationMs()).isNotNull());
+		assertThat(mediaRepository.findById("r1").orElseThrow().getOwnerIgUserId()).isEqualTo("900");
+		// 협업 게시물의 소유자는 내 계정
+		assertThat(mediaRepository.findById("m1").orElseThrow().getOwnerIgUserId()).isEqualTo("100");
+		List<MediaMetricSnapshot> snapshots = snapshotRepository.findByAnalysisId(response.id());
+		assertThat(snapshots).filteredOn(s -> s.getMediaId().equals("m1"))
+			.extracting(MediaMetricSnapshot::getAccountIgId)
+			.containsExactlyInAnyOrder("100", "900");
+		assertThat(snapshots).filteredOn(s -> s.getMediaId().equals("r1"))
+			.singleElement()
+			.satisfies(s -> {
+				assertThat(s.getAccountIgId()).isEqualTo("900");
+				assertThat(s.getViews()).isEqualTo(29624);
+				assertThat(s.getSkipRate()).isNull();
+				assertThat(s.getLikeCount()).isNull();
+			});
+	}
+
+	@Test
+	void 참고_계정_수집_중_예상하지_못한_오류가_나도_내_계정_분석은_완료된다() {
+		referenceRepository.save(new ReferenceAccount("100", "ref.a", "900", 1, Instant.now()));
+		given(referenceReader.read(eq("100"), eq("ref.a"), anyInt(), any()))
+			.willThrow(new IllegalStateException("예상 못한 오류"));
+
+		AnalysisResponse response = analysisService.request("100");
+
+		assertThat(response.status()).isEqualTo(AnalysisStatus.DONE);
+		assertThat(response.references()).singleElement()
+			.satisfies(r -> assertThat(r.failureType()).isEqualTo("UNEXPECTED"));
 	}
 
 	@Test

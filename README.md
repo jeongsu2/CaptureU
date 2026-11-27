@@ -57,13 +57,19 @@
 ### 내 계정 분석해 보기
 
 1. `.env.example`을 복사해 `.env`를 만들고 `IG_ACCESS_TOKEN`, `IG_USER_ID`를 채운다 (`.env`는 커밋되지 않는다)
-2. 앱을 실행하고 분석을 요청한다
+2. 앱을 실행하고, 비교할 참고 계정 2개를 등록한다 (선택, 프로페셔널 계정만 가능)
+
+```bash
+curl -X PUT http://localhost:8080/api/reference-accounts -H 'Content-Type: application/json' -d '{"usernames":["참고계정1","참고계정2"]}'
+```
+
+3. 분석을 요청한다
 
 ```bash
 curl -X POST http://localhost:8080/api/analyses
 ```
 
-응답에 게시물 수, 인사이트를 못 받은 게시물 수, 외부 API 호출 수, 걸린 시간(ms)이 나온다. 결과는 `GET /api/analyses/{id}`로 다시 볼 수 있다.
+응답에 게시물 수, 인사이트를 못 받은 게시물 수, 참고 계정별 수집 결과, 외부 API 호출 수, 걸린 시간(ms)이 나온다. 결과는 `GET /api/analyses/{id}`로 다시 볼 수 있다.
 
 ## 진행
 

@@ -26,3 +26,8 @@ interface AudienceDemographicRepository extends JpaRepository<AudienceDemographi
 
 	List<AudienceDemographic> findByAnalysisId(Long analysisId);
 }
+
+interface AnalysisReferenceRepository extends JpaRepository<AnalysisReference, Long> {
+
+	List<AnalysisReference> findByAnalysisIdOrderByIdAsc(Long analysisId);
+}
