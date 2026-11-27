@@ -40,7 +40,10 @@ class ProfileController {
 
 	/** 예: {"main": "BEAUTY", "sub": "FASHION"}. sub는 없어도 된다. */
 	@PutMapping
-	Concepts change(@RequestBody Concepts request) {
+	Concepts change(@RequestBody(required = false) Concepts request) {
+		if (request == null) {
+			throw new IllegalArgumentException("메인 컨셉을 골라 주세요");
+		}
 		return profileService.change(request.main(), request.sub());
 	}
 

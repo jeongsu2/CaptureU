@@ -46,9 +46,7 @@ public class ProfileService {
 		if (owner == null || owner.isBlank()) {
 			throw new AccountNotConnectedException();
 		}
-		CreatorProfile profile = repository.findById(owner).orElseGet(() -> new CreatorProfile(owner));
-		profile.change(main, sub, Instant.now(clock));
-		repository.save(profile);
+		repository.upsert(owner, main.name(), sub == null ? null : sub.name(), Instant.now(clock));
 		return new Concepts(main, sub);
 	}
 

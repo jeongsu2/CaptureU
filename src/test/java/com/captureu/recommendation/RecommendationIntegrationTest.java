@@ -34,6 +34,8 @@ import com.captureu.instagram.account.MediaItem;
 import com.captureu.instagram.account.ReferenceAccountReader;
 import com.captureu.instagram.graph.GraphApiErrorType;
 import com.captureu.instagram.graph.GraphApiException;
+import com.captureu.profile.Concept;
+import com.captureu.profile.ProfileService;
 
 /** 분석이 끝난 뒤 API로 추천을 받고 다시 조회한다. 로컬 .env에 키가 있어도 실제 API를 부르지 않게 키를 비운다. */
 @Import(TestcontainersConfiguration.class)
@@ -48,6 +50,10 @@ class RecommendationIntegrationTest {
 	AnalysisService analysisService;
 	@Autowired
 	RecommendationRepository repository;
+	@Autowired
+	ProfileService profileService;
+	@Autowired
+	org.springframework.jdbc.core.JdbcTemplate jdbc;
 
 	@MockitoBean
 	InstagramAccountReader reader;
@@ -90,7 +96,8 @@ class RecommendationIntegrationTest {
 		mockMvc.perform(get(location))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.result.hooks[0].text").value("겨울 출근룩, 아직도 이렇게 하세요?"))
-			.andExpect(jsonPath("$.result.notes[0]").value(org.hamcrest.Matchers.containsString("한 계정 스타일")));
+			.andExpect(jsonPath("$.result.notes[0]").value(org.hamcrest.Matchers.containsString("한 계정 스타일")))
+			.andExpect(jsonPath("$.adoptedHookIndexes.length()").value(0));
 		assertThat(repository.findAll()).anySatisfy(r -> assertThat(r.getAnalysisId()).isEqualTo(analysisId));
 
 		// 채택 (#15): 후보 번호로 고르면 문구와 프롬프트 버전을 함께 기록한다
@@ -100,12 +107,33 @@ class RecommendationIntegrationTest {
 			.andExpect(jsonPath("$.hookType").value("LIST"))
 			.andExpect(jsonPath("$.hookText").value("겨울 출근룩 3가지 모음.zip"))
 			.andExpect(jsonPath("$.promptVersion").value("template-v1"));
+		mockMvc.perform(get(location)).andExpect(jsonPath("$.adoptedHookIndexes[0]").value(1));
 		mockMvc.perform(post(location + "/adoptions").contentType(MediaType.APPLICATION_JSON).content("{\"hookIndex\":5}"))
 			.andExpect(status().isBadRequest());
 		mockMvc.perform(post(location + "/adoptions").contentType(MediaType.APPLICATION_JSON).content("{}"))
 			.andExpect(status().isBadRequest());
 		mockMvc.perform(post("/api/recommendations/999999/adoptions").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"hookIndex\":0}")).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void 처음_컨셉을_저장하는_요청이_겹쳐도_한_행으로_합친다() throws Exception {
+		jdbc.update("delete from creator_profile");
+		try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+			var start = new java.util.concurrent.CountDownLatch(1);
+			var a = executor.submit(() -> {
+				start.await();
+				return profileService.change(Concept.BEAUTY, null);
+			});
+			var b = executor.submit(() -> {
+				start.await();
+				return profileService.change(Concept.BEAUTY, Concept.FASHION);
+			});
+			start.countDown();
+			a.get();
+			b.get();
+		}
+		assertThat(jdbc.queryForObject("select count(*) from creator_profile", Integer.class)).isEqualTo(1);
 	}
 
 	@Test
@@ -130,6 +158,8 @@ class RecommendationIntegrationTest {
 			.content("{\"sub\":\"FOOD\"}")).andExpect(status().isBadRequest());
 		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"main\":\"NOPE\"}")).andExpect(status().isBadRequest());
+		mockMvc.perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON).content("null"))
+			.andExpect(status().isBadRequest());
 	}
 
 	@Test
@@ -148,6 +178,11 @@ class RecommendationIntegrationTest {
 		mockMvc.perform(post("/api/analyses/" + analysisId + "/recommendations")
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"topic\":\"\u3000\"}")).andExpect(status().isBadRequest());
+		mockMvc.perform(post("/api/analyses/" + analysisId + "/recommendations")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"topic\":\"" + "가".repeat(41) + "\"}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.detail").value("주제는 40자까지 넣을 수 있어요"));
 		mockMvc.perform(post("/api/analyses/999999/recommendations").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"topic\":\"홈카페\"}")).andExpect(status().isNotFound());
 

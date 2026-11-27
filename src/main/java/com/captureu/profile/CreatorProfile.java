@@ -37,13 +37,4 @@ public class CreatorProfile {
 	@Column(nullable = false)
 	private Instant updatedAt;
 
-	CreatorProfile(String igUserId) {
-		this.igUserId = igUserId;
-	}
-
-	void change(Concept main, Concept sub, Instant now) {
-		this.mainConcept = main;
-		this.subConcept = sub;
-		this.updatedAt = now;
-	}
 }

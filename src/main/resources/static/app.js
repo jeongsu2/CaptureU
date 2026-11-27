@@ -5,6 +5,7 @@ const HOOK_LABELS = {
 };
 const SCOPE_LABELS = { COMMON: '공통 패턴', OWN: '내 계정', SINGLE: '한 계정 스타일' };
 const LAST_ANALYSIS = 'captureu.lastAnalysisId';
+const LAST_RECOMMENDATION = 'captureu.lastRecommendationId';
 
 const $ = (sel) => document.querySelector(sel);
 const fmt = (n) => (n == null ? '-' : Math.round(n).toLocaleString('ko-KR'));
@@ -37,15 +38,16 @@ async function api(method, url, body) {
   return data;
 }
 
-function remember(id) {
-  try { localStorage.setItem(LAST_ANALYSIS, String(id)); } catch (e) { /* 저장이 막혀 있어도 화면은 동작한다 */ }
+function remember(key, id) {
+  try { localStorage.setItem(key, String(id)); } catch (e) { /* 저장이 막혀 있어도 화면은 동작한다 */ }
 }
-function recall() {
-  try { return localStorage.getItem(LAST_ANALYSIS); } catch (e) { return null; }
+function recall(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
 }
 
 // 1. 컨셉
 const concept = { main: null, sub: null };
+let conceptSaving = false;
 
 function renderConceptChips(options) {
   const draw = (boxSel, key) => {
@@ -54,6 +56,7 @@ function renderConceptChips(options) {
     options.forEach((o) => {
       const b = el('button', null, o.label);
       b.type = 'button';
+      b.disabled = conceptSaving; // 저장 중에는 막아 요청 순서가 뒤바뀌지 않게
       b.setAttribute('aria-pressed', String(concept[key] === o.code));
       b.addEventListener('click', () => chooseConcept(key, o.code, options));
       box.append(b);
@@ -64,33 +67,49 @@ function renderConceptChips(options) {
 }
 
 async function chooseConcept(key, code, options) {
+  if (conceptSaving) return;
   if (key === 'sub' && code === concept.main) return; // 메인과 같은 컨셉은 2순위로 못 고른다
-  const prev = { ...concept };
   if (key === 'main') {
     concept.main = code;
     if (concept.sub === code) concept.sub = null;
   } else {
     concept.sub = concept.sub === code ? null : code; // 다시 누르면 해제
   }
+  if (!concept.main) {
+    renderConceptChips(options);
+    setMsg($('#concept-msg'), '메인 컨셉을 먼저 골라 주세요.');
+    return;
+  }
+  conceptSaving = true;
   renderConceptChips(options);
-  if (!concept.main) { setMsg($('#concept-msg'), '메인 컨셉을 먼저 골라 주세요.'); return; }
   try {
-    await api('PUT', '/api/profile', { main: concept.main, sub: concept.sub });
+    Object.assign(concept, await api('PUT', '/api/profile', { main: concept.main, sub: concept.sub }));
     setMsg($('#concept-msg'), '저장했어요.');
   } catch (e) {
-    Object.assign(concept, prev);
-    renderConceptChips(options);
     setMsg($('#concept-msg'), e.message, true);
+    await reloadSavedConcept(); // 실패하면 서버에 저장된 값으로 되돌린다
+  } finally {
+    conceptSaving = false;
+    renderConceptChips(options);
   }
+}
+
+/** 저장된 컨셉을 읽는다. 204는 아직 고르지 않음, 그 밖의 실패는 오류로 보여 준다. */
+async function reloadSavedConcept() {
+  const res = await fetch('/api/profile');
+  if (res.status === 204) {
+    Object.assign(concept, { main: null, sub: null });
+    return;
+  }
+  if (!res.ok) throw new Error(`저장된 컨셉을 불러오지 못했어요 (${res.status})`);
+  const saved = await res.json();
+  Object.assign(concept, { main: saved.main, sub: saved.sub || null });
 }
 
 async function loadConcepts() {
   try {
-    const [options, res] = await Promise.all([
-      api('GET', '/api/profile/concepts'),
-      fetch('/api/profile'),
-    ]);
-    if (res.status === 200) Object.assign(concept, await res.json());
+    const options = await api('GET', '/api/profile/concepts');
+    await reloadSavedConcept();
     renderConceptChips(options);
   } catch (e) {
     setMsg($('#concept-msg'), e.message, true);
@@ -143,7 +162,7 @@ $('#analyze-btn').addEventListener('click', async () => {
     const sec = a.durationMs != null ? ` (${(a.durationMs / 1000).toFixed(1)}초)` : '';
     setMsg($('#analysis-msg'), `게시물 ${a.mediaCount}개를 분석했어요${sec}.`
       + (failed.length ? `\n${failed.join(', ')}는 가져오지 못했어요.` : ''));
-    remember(a.id);
+    remember(LAST_ANALYSIS, a.id);
     await showReport(a.id);
   } catch (e) {
     setMsg($('#analysis-msg'), e.message, true);
@@ -217,12 +236,14 @@ $('#topic-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const topic = $('#topic').value.trim();
   if (!topic) { setMsg($('#rec-msg'), '주제를 한 줄로 넣어 주세요.', true); return; }
+  if (topic.length > 40) { setMsg($('#rec-msg'), '주제는 40자까지 넣을 수 있어요.', true); return; }
   const btn = ev.target.querySelector('button');
   btn.disabled = true;
   setMsg($('#rec-msg'), '추천을 만드는 중이에요...');
   try {
     const rec = await api('POST', `/api/analyses/${currentAnalysisId}/recommendations`, { topic });
     setMsg($('#rec-msg'), '');
+    remember(LAST_RECOMMENDATION, rec.id);
     renderRecommendation(rec);
   } catch (e) {
     setMsg($('#rec-msg'), e.message, true);
@@ -231,7 +252,14 @@ $('#topic-form').addEventListener('submit', async (ev) => {
   }
 });
 
+function showAfterAdoption(scroll) {
+  $('#step-more').classList.remove('hidden');
+  if (scroll) $('#step-more').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function renderRecommendation(rec) {
+  $('#topic').value = rec.topic;
+  const adopted = new Set(rec.adoptedHookIndexes || []);
   const box = $('#recommendation');
   box.replaceChildren();
   const r = rec.result;
@@ -253,16 +281,22 @@ function renderRecommendation(rec) {
         ev.target.textContent = '복사 실패';
       }
     });
-    li.querySelector('.adopt').addEventListener('click', async (ev) => {
+    const adoptBtn = li.querySelector('.adopt');
+    if (adopted.has(index)) {
+      li.classList.add('adopted');
+      adoptBtn.textContent = '채택함';
+      adoptBtn.disabled = true;
+    }
+    adoptBtn.addEventListener('click', async (ev) => {
       ev.target.disabled = true;
+      // 클릭 직후에 복사해야 브라우저(특히 Safari)가 클립보드 쓰기를 허용한다
+      const copied = navigator.clipboard.writeText(h.text).then(() => true, () => false);
       try {
         await api('POST', `/api/recommendations/${rec.id}/adoptions`, { hookIndex: index });
         li.classList.add('adopted');
-        ev.target.textContent = '채택함';
-        await navigator.clipboard.writeText(h.text).catch(() => {});
+        ev.target.textContent = (await copied) ? '채택함 · 복사됨' : '채택함';
         // 채택한 뒤 다음 화면: 올린 뒤 추적 기능 소개
-        $('#step-more').classList.remove('hidden');
-        $('#step-more').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showAfterAdoption(true);
       } catch (e) {
         ev.target.disabled = false;
         setMsg($('#rec-msg'), e.message, true);
@@ -271,6 +305,7 @@ function renderRecommendation(rec) {
     list.append(li);
   });
   box.append(list);
+  if (adopted.size) showAfterAdoption(false);
 
   box.append(el('h3', null, '썸네일 구성안'));
   const thumb = el('div', 'thumb');
@@ -297,5 +332,15 @@ $('#more-btn').addEventListener('click', () => {
 
 loadConcepts();
 loadRefs();
-const last = recall();
-if (last) showReport(last).catch(() => { /* 지난 분석이 없거나 실패했으면 처음부터 */ });
+// 새로고침해도 지난 분석 리포트와 마지막 추천(채택 표시 포함)을 다시 보여 준다. 추천을 새로 만들지 않는다
+const lastAnalysis = recall(LAST_ANALYSIS);
+if (lastAnalysis) {
+  showReport(lastAnalysis)
+    .then(async () => {
+      const lastRec = recall(LAST_RECOMMENDATION);
+      if (!lastRec) return;
+      const rec = await api('GET', `/api/recommendations/${lastRec}`);
+      if (String(rec.analysisId) === String(lastAnalysis)) renderRecommendation(rec);
+    })
+    .catch(() => { /* 지난 분석이나 추천이 없으면 처음부터 */ });
+}
