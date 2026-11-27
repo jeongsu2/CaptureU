@@ -91,10 +91,12 @@ public class ThumbnailService {
 	 * @param alreadyTagged 이전에 분석해 건너뛴 수
 	 * @param tagged        이번에 새로 LLM으로 분석한 수
 	 * @param reused        이미지가 같아 이전 결과를 쓴 수
-	 * @param expired       썸네일 주소가 만료돼 받지 못한 수 (다시 분석하면 새 주소를 받는다)
+	 * @param expired       썸네일 주소가 만료돼 받지 못한 수 (분석을 새로 실행하면 새 주소를 받는다)
+	 * @param noThumbnail   썸네일 주소가 없는 게시물 수
+	 * @param unpriced      가격표에 없는 모델이 답해 비용에 넣지 못한 호출 수 (costUsd가 실제보다 적을 수 있음)
 	 */
 	public record TagResult(TagStatus status, int selected, int alreadyTagged, int tagged, int reused, int expired,
-			int failed, BigDecimal costUsd, long durationMs) {
+			int noThumbnail, int failed, int unpriced, BigDecimal costUsd, long durationMs) {
 	}
 
 	/** 분석 한 건의 썸네일을 분석한다. 이미 분석한 게시물은 건너뛰므로 여러 번 불러도 비용이 다시 들지 않는다. */
@@ -102,26 +104,36 @@ public class ThumbnailService {
 		long start = System.nanoTime();
 		AnalysisOutliers outliers = outlierService.compute(analysisId);
 		List<String> selected = accounts(outliers).stream().flatMap(a -> select(a).stream()).distinct().toList();
-		List<String> todo = selected.stream().filter(id -> !mediaThumbnailRepository.existsById(id)).toList();
+		java.util.Set<String> done = mediaThumbnailRepository.findAllById(selected)
+			.stream()
+			.map(MediaThumbnail::getMediaId)
+			.collect(Collectors.toSet());
+		List<String> todo = selected.stream().filter(id -> !done.contains(id)).toList();
 		int already = selected.size() - todo.size();
 		if (!tagger.enabled()) {
-			return new TagResult(TagStatus.SKIPPED_NO_API_KEY, selected.size(), already, 0, 0, 0, 0, BigDecimal.ZERO,
-					elapsed(start));
+			return new TagResult(TagStatus.SKIPPED_NO_API_KEY, selected.size(), already, 0, 0, 0, 0, 0, 0,
+					BigDecimal.ZERO, elapsed(start));
 		}
 		Instant now = Instant.now(clock);
 		Map<String, ThumbnailRef> refs = mediaQuery.thumbnails(todo);
 		AtomicInteger tagged = new AtomicInteger();
 		AtomicInteger reused = new AtomicInteger();
 		AtomicInteger failed = new AtomicInteger();
+		AtomicInteger unpriced = new AtomicInteger();
 		AtomicReference<BigDecimal> cost = new AtomicReference<>(BigDecimal.ZERO);
 		int expired = 0;
+		int noThumbnail = 0;
 		Semaphore permits = new Semaphore(CONCURRENCY);
 		// 같은 이미지가 여러 게시물에 쓰였으면(재업로드 등) 이번 실행 안에서도 한 번만 분석한다
 		Map<String, CompletableFuture<Void>> inFlight = new ConcurrentHashMap<>();
 		try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
 			for (String mediaId : todo) {
 				ThumbnailRef ref = refs.get(mediaId);
-				if (ref == null || ref.expired(now)) {
+				if (ref == null) {
+					noThumbnail++;
+					continue;
+				}
+				if (ref.expired(now)) {
 					expired++;
 					continue;
 				}
@@ -132,6 +144,9 @@ public class ThumbnailService {
 						(outcome.newlyTagged() ? tagged : reused).incrementAndGet();
 						if (outcome.cost() != null) {
 							cost.accumulateAndGet(outcome.cost(), BigDecimal::add);
+						}
+						else if (outcome.called()) {
+							unpriced.incrementAndGet();
 						}
 					}
 					catch (RuntimeException e) {
@@ -145,17 +160,18 @@ public class ThumbnailService {
 			}
 		}
 		return new TagResult(TagStatus.DONE, selected.size(), already, tagged.get(), reused.get(), expired,
-				failed.get(), cost.get(), elapsed(start));
+				noThumbnail, failed.get(), unpriced.get(), cost.get(), elapsed(start));
 	}
 
-	private record Outcome(boolean newlyTagged, BigDecimal cost) {
+	/** @param called 이번에 LLM을 불렀는지 (비용이 든 호출) */
+	private record Outcome(boolean newlyTagged, BigDecimal cost, boolean called) {
 	}
 
 	private Outcome tagOne(String mediaId, String url, Map<String, CompletableFuture<Void>> inFlight) {
 		Image image = fetcher.fetch(url);
 		String hash = sha256(image.bytes());
 		Instant now = Instant.now(clock);
-		Outcome outcome = new Outcome(false, null);
+		Outcome outcome = new Outcome(false, null, false);
 		CompletableFuture<Void> mine = new CompletableFuture<>();
 		CompletableFuture<Void> existing = inFlight.putIfAbsent(hash, mine);
 		if (existing != null) {
@@ -172,11 +188,14 @@ public class ThumbnailService {
 					try {
 						featureRepository.save(ThumbnailFeature.of(hash, t.tags(), t.model(), t.promptVersion(),
 								t.inputTokens(), t.outputTokens(), t.costUsd(), now));
-						outcome = new Outcome(true, t.costUsd());
+						outcome = new Outcome(true, t.costUsd(), true);
 					}
 					catch (DataIntegrityViolationException e) {
-						// 다른 요청(동시에 부른 분석)이 같은 이미지를 먼저 저장함. 비용은 이미 들었으므로 센다
-						outcome = new Outcome(false, t.costUsd());
+						// 다른 요청(동시에 부른 분석)이 같은 이미지를 먼저 저장했을 때만 괜찮다. 그 밖의 무결성 오류는 실패로 본다
+						if (!featureRepository.existsById(hash)) {
+							throw e;
+						}
+						outcome = new Outcome(false, t.costUsd(), true);
 					}
 				}
 			}
@@ -188,7 +207,10 @@ public class ThumbnailService {
 			mediaThumbnailRepository.save(new MediaThumbnail(mediaId, hash, now));
 		}
 		catch (DataIntegrityViolationException e) {
-			// 동시에 같은 게시물을 분석한 요청이 먼저 저장함
+			// 동시에 같은 게시물을 분석한 요청이 먼저 저장했을 때만 괜찮다
+			if (!mediaThumbnailRepository.existsById(mediaId)) {
+				throw e;
+			}
 		}
 		return outcome;
 	}
@@ -241,25 +263,28 @@ public class ThumbnailService {
 
 	/** 비교하는 특징. 각각 "이 특징이 있는 썸네일 비율"을 아웃라이어와 나머지로 나눠 본다. */
 	public enum Feature {
-		FACE_CLOSE_UP("얼굴 클로즈업", f -> f.isFaceCloseUp()),
-		LARGE_TEXT("큰 제목 글씨", f -> f.getTextSize() == TextSize.LARGE),
-		ANY_TEXT("글씨 있음", f -> f.getTextSize() != TextSize.NONE),
-		NO_PERSON("사람 없음", f -> f.getPersonCount() == 0),
-		TONE_BRIGHT("밝은 색감", f -> f.getTone() == Tone.BRIGHT),
-		TONE_DARK("어두운 색감", f -> f.getTone() == Tone.DARK),
-		TONE_PASTEL("파스텔 색감", f -> f.getTone() == Tone.PASTEL),
-		TONE_VIVID("강렬한 색감", f -> f.getTone() == Tone.VIVID),
-		CENTER_SUBJECT("가운데 인물·제품", f -> f.getComposition() == Composition.CENTER_SUBJECT),
-		FULL_BODY("전신", f -> f.getComposition() == Composition.FULL_BODY),
-		FLAT_LAY("위에서 본 제품 배치", f -> f.getComposition() == Composition.FLAT_LAY),
-		SPLIT("전후 비교·분할", f -> f.getComposition() == Composition.SPLIT),
-		TEXT_CARD("글자 카드", f -> f.getComposition() == Composition.TEXT_CARD);
+		FACE_CLOSE_UP("얼굴 클로즈업", "PERSON", f -> f.isFaceCloseUp()),
+		LARGE_TEXT("큰 제목 글씨", "TEXT", f -> f.getTextSize() == TextSize.LARGE),
+		ANY_TEXT("글씨 있음", "TEXT", f -> f.getTextSize() != TextSize.NONE),
+		NO_PERSON("사람 없음", "PERSON", f -> f.getPersonCount() == 0),
+		TONE_BRIGHT("밝은 색감", "TONE", f -> f.getTone() == Tone.BRIGHT),
+		TONE_DARK("어두운 색감", "TONE", f -> f.getTone() == Tone.DARK),
+		TONE_PASTEL("파스텔 색감", "TONE", f -> f.getTone() == Tone.PASTEL),
+		TONE_VIVID("강렬한 색감", "TONE", f -> f.getTone() == Tone.VIVID),
+		CENTER_SUBJECT("가운데 인물·제품", "COMPOSITION", f -> f.getComposition() == Composition.CENTER_SUBJECT),
+		FULL_BODY("전신", "COMPOSITION", f -> f.getComposition() == Composition.FULL_BODY),
+		FLAT_LAY("위에서 본 제품 배치", "COMPOSITION", f -> f.getComposition() == Composition.FLAT_LAY),
+		SPLIT("전후 비교·분할", "COMPOSITION", f -> f.getComposition() == Composition.SPLIT),
+		TEXT_CARD("글자 카드", "COMPOSITION", f -> f.getComposition() == Composition.TEXT_CARD);
 
 		final String label;
+		/** 같은 그룹의 특징은 서로 겹치거나 반대라(얼굴 클로즈업 vs 사람 없음, 색감 여러 개) 근거로는 하나만 쓴다. */
+		final String group;
 		final Predicate<ThumbnailFeature> test;
 
-		Feature(String label, Predicate<ThumbnailFeature> test) {
+		Feature(String label, String group, Predicate<ThumbnailFeature> test) {
 			this.label = label;
+			this.group = group;
 			this.test = test;
 		}
 
@@ -295,7 +320,8 @@ public class ThumbnailService {
 	 *
 	 * @param evidence 예: "참고 계정 3개 중 2개(@a 잘된 썸네일 70% vs 나머지 30%, ...)에서 얼굴 클로즈업"
 	 */
-	public record ThumbnailSignal(Feature feature, String label, Scope scope, String evidence) {
+	public record ThumbnailSignal(Feature feature, String label, Scope scope, int referenceAccounts, boolean own,
+			String evidence) {
 	}
 
 	public record ThumbnailComparison(Long analysisId, List<AccountThumbnails> accounts,
@@ -395,9 +421,15 @@ public class ThumbnailService {
 			if (own != null) {
 				parts.add(own);
 			}
-			signals.add(new ThumbnailSignal(f, f.label(), scope, String.join("와 ", parts) + "에서 잘된 썸네일의 특징: " + f.label()));
+			signals.add(new ThumbnailSignal(f, f.label(), scope, refs.size(), own != null,
+					String.join("와 ", parts) + "에서 잘된 썸네일의 특징: " + f.label()));
 		}
-		signals.sort(Comparator.comparing(ThumbnailSignal::scope));
-		return List.copyOf(signals);
+		// 공통 → 내 계정 → 한 계정, 같은 범위면 근거 계정이 많은 것, 내 계정에서도 잘된 것 먼저
+		signals.sort(Comparator.comparing(ThumbnailSignal::scope)
+			.thenComparing(ThumbnailSignal::referenceAccounts, Comparator.reverseOrder())
+			.thenComparing(s -> !s.own()));
+		// 같은 그룹에서는 우선순위가 가장 높은 하나만 남긴다 (서로 반대되는 지시가 함께 나가지 않게)
+		java.util.Set<String> groups = new java.util.HashSet<>();
+		return signals.stream().filter(s -> groups.add(s.feature().group)).toList();
 	}
 }

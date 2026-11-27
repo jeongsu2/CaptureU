@@ -17,6 +17,15 @@ class ThumbnailImageFetcherTest {
 		assertThat(ThumbnailImageFetcher.allowed(url)).isNotNull();
 	}
 
+	@org.junit.jupiter.api.Test
+	void Claude가_받는_이미지_형식만_받는다() {
+		assertThat(ThumbnailImageFetcher.mediaType("image/jpeg; charset=binary")).isEqualTo("image/jpeg");
+		assertThat(ThumbnailImageFetcher.mediaType("IMAGE/WEBP")).isEqualTo("image/webp");
+		assertThatThrownBy(() -> ThumbnailImageFetcher.mediaType("text/html")).isInstanceOf(ThumbnailFetchException.class);
+		assertThatThrownBy(() -> ThumbnailImageFetcher.mediaType("image/heic")).isInstanceOf(ThumbnailFetchException.class);
+		assertThatThrownBy(() -> ThumbnailImageFetcher.mediaType("")).isInstanceOf(ThumbnailFetchException.class);
+	}
+
 	@ParameterizedTest
 	@ValueSource(strings = { "http://scontent.cdninstagram.com/x.jpg", "https://evil.example.com/x.jpg",
 			"https://cdninstagram.com.evil.com/x.jpg", "https://scontent.cdninstagram.com:8443/x.jpg",

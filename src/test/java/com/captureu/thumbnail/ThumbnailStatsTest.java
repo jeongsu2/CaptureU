@@ -52,6 +52,27 @@ class ThumbnailStatsTest {
 	}
 
 	@Test
+	void 같은_범위에서는_근거_계정이_많은_특징이_먼저고_서로_반대되는_특징은_하나만_남긴다() {
+		FeatureStat face = new FeatureStat(Feature.FACE_CLOSE_UP, "얼굴 클로즈업", 70, 30, 40, true);
+		FeatureStat vivid = new FeatureStat(Feature.TONE_VIVID, "강렬한 색감", 70, 30, 40, true);
+		FeatureStat dark = new FeatureStat(Feature.TONE_DARK, "어두운 색감", 70, 30, 40, true);
+		FeatureStat noPerson = new FeatureStat(Feature.NO_PERSON, "사람 없음", 70, 30, 40, true);
+		FeatureStat large = new FeatureStat(Feature.LARGE_TEXT, "큰 제목 글씨", 70, 30, 40, true);
+		FeatureStat any = new FeatureStat(Feature.ANY_TEXT, "글씨 있음", 70, 30, 40, true);
+
+		List<ThumbnailSignal> signals = ThumbnailService.signals(List.of(
+				new AccountThumbnails("me", true, 5, 5, List.of(noPerson, dark)),
+				new AccountThumbnails("ref.a", false, 5, 5, List.of(face, vivid, large, any)),
+				new AccountThumbnails("ref.b", false, 5, 5, List.of(face, vivid, large, any)),
+				new AccountThumbnails("ref.c", false, 5, 5, List.of(vivid))), 3);
+
+		// 강렬한 색감(참고 3개)이 얼굴 클로즈업(참고 2개)보다 먼저. 어두운 색감은 색감 그룹이라,
+		// 사람 없음은 얼굴 클로즈업과 반대라, 글씨 있음은 큰 제목 글씨와 겹쳐서 빠진다
+		assertThat(signals).extracting(ThumbnailSignal::feature)
+			.containsExactly(Feature.TONE_VIVID, Feature.FACE_CLOSE_UP, Feature.LARGE_TEXT);
+	}
+
+	@Test
 	void 참고_계정_2개_이상의_특징은_공통으로_먼저_온다() {
 		FeatureStat face = new FeatureStat(Feature.FACE_CLOSE_UP, "얼굴 클로즈업", 70, 30, 40, true);
 		FeatureStat text = new FeatureStat(Feature.LARGE_TEXT, "큰 제목 글씨", 80, 20, 60, true);

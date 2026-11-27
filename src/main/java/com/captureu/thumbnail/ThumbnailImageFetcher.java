@@ -23,17 +23,25 @@ class ThumbnailImageFetcher {
 	Image fetch(String url) {
 		URI uri = allowed(url);
 		try {
-			HttpResponse<byte[]> res = http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).GET().build(),
-					HttpResponse.BodyHandlers.ofByteArray());
-			if (res.statusCode() != 200) {
-				throw new ThumbnailFetchException("HTTP " + res.statusCode());
+			HttpResponse<java.io.InputStream> res = http.send(
+					HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).GET().build(),
+					HttpResponse.BodyHandlers.ofInputStream());
+			try (java.io.InputStream in = res.body()) {
+				if (res.statusCode() != 200) {
+					throw new ThumbnailFetchException("HTTP " + res.statusCode());
+				}
+				long declared = res.headers().firstValueAsLong("Content-Length").orElse(-1);
+				if (declared > MAX_BYTES) {
+					throw new ThumbnailFetchException("크기 " + declared);
+				}
+				String type = mediaType(res.headers().firstValue("Content-Type").orElse(""));
+				// 큰 응답을 통째로 메모리에 올리지 않게 상한 + 1바이트까지만 읽는다
+				byte[] body = in.readNBytes(MAX_BYTES + 1);
+				if (body.length == 0 || body.length > MAX_BYTES) {
+					throw new ThumbnailFetchException("크기 " + body.length);
+				}
+				return new Image(body, type);
 			}
-			byte[] body = res.body();
-			if (body.length == 0 || body.length > MAX_BYTES) {
-				throw new ThumbnailFetchException("크기 " + body.length);
-			}
-			String type = res.headers().firstValue("Content-Type").orElse("image/jpeg").toLowerCase(Locale.ROOT);
-			return new Image(body, mediaType(type));
 		}
 		catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
@@ -60,14 +68,15 @@ class ThumbnailImageFetcher {
 		return uri;
 	}
 
-	private static String mediaType(String contentType) {
-		if (contentType.startsWith("image/png")) {
-			return "image/png";
-		}
-		if (contentType.startsWith("image/webp")) {
-			return "image/webp";
-		}
-		return "image/jpeg";
+	/** Claude가 받는 형식(jpeg, png, webp)만 받는다. 그 밖의 응답은 매번 다시 받아도 실패하므로 여기서 거절한다. */
+	static String mediaType(String contentType) {
+		String type = contentType.toLowerCase(Locale.ROOT).split(";")[0].strip();
+		return switch (type) {
+			case "image/jpeg", "image/jpg" -> "image/jpeg";
+			case "image/png" -> "image/png";
+			case "image/webp" -> "image/webp";
+			default -> throw new ThumbnailFetchException("지원하지 않는 형식 " + (type.isEmpty() ? "(없음)" : type));
+		};
 	}
 
 	record Image(byte[] bytes, String mediaType) {
