@@ -75,22 +75,24 @@ class AnalysisWriter {
 		for (CollectedReference ref : references) {
 			if (!ref.succeeded()) {
 				referenceResults.add(AnalysisReference.failed(analysisId, ref.username(), ref.failureType(),
-						ref.failureMessage(), ref.apiCallCount(), ref.durationMs()));
+						ref.failureMessage(), ref.apiCallCount(), ref.durationMs(), false));
 				continue;
 			}
 			var profile = ref.data().profile();
 			String account = referenceAccountId(profile.igId(), ref.username());
 			if (!accounts.add(account)) {
 				referenceResults.add(AnalysisReference.failed(analysisId, ref.username(), "DUPLICATE_ACCOUNT",
-						"내 계정 또는 다른 참고 계정과 같은 계정", ref.apiCallCount(), ref.durationMs()));
+						"내 계정 또는 다른 참고 계정과 같은 계정", ref.apiCallCount(), ref.durationMs(), ref.cacheHit()));
 				continue;
 			}
 			Set<String> refSeen = new HashSet<>();
+			// 캐시에서 꺼낸 결과는 받은 시각이 과거다. 게시 후 경과 시간 등이 어긋나지 않게 실제로 받은 시각을 쓴다
+			Instant refCollectedAt = ref.fetchedAt() != null ? ref.fetchedAt() : collectedAt;
 			for (ReferenceMedia rm : ref.data().media()) {
 				if (refSeen.add(rm.item().id())) {
 					mediaById.putIfAbsent(rm.item().id(), new OwnedMedia(account, rm.item(), false));
 					snapshots.add(
-							MediaMetricSnapshot.ofReference(analysisId, account, rm.item(), rm.viewCount(), collectedAt));
+							MediaMetricSnapshot.ofReference(analysisId, account, rm.item(), rm.viewCount(), refCollectedAt));
 				}
 			}
 			referenceResults.add(AnalysisReference.done(analysisId, ref.username(), profile.igId(),

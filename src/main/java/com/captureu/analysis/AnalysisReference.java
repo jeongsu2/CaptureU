@@ -74,7 +74,7 @@ public class AnalysisReference {
 	}
 
 	static AnalysisReference failed(Long analysisId, String username, String failureType, String failureMessage,
-			int apiCallCount, long durationMs) {
+			int apiCallCount, long durationMs, boolean cacheHit) {
 		AnalysisReference r = new AnalysisReference();
 		r.analysisId = analysisId;
 		r.username = username;
@@ -83,6 +83,7 @@ public class AnalysisReference {
 		r.failureMessage = Texts.truncate(failureMessage, 500);
 		r.apiCallCount = apiCallCount;
 		r.durationMs = durationMs;
+		r.cacheHit = cacheHit;
 		return r;
 	}
 }
