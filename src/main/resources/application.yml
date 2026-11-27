@@ -3,6 +3,9 @@ spring:
     name: captureu
   profiles:
     default: local
+  config:
+    # 로컬 비밀값(.env, 커밋 안 됨)을 읽는다. 없으면 건너뛴다. 형식은 .env.example 참고
+    import: optional:file:.env[.properties]
   jpa:
     open-in-view: false
     hibernate:
@@ -14,6 +17,12 @@ spring:
           time_zone: UTC
   flyway:
     enabled: true
+
+captureu:
+  instagram:
+    graph:
+      access-token: ${IG_ACCESS_TOKEN:}
+      ig-user-id: ${IG_USER_ID:}
 
 management:
   endpoints:
