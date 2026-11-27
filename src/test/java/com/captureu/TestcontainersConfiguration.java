@@ -11,7 +11,7 @@ import org.testcontainers.utility.DockerImageName;
  * 테스트용 MySQL, Redis 컨테이너. 이미지 버전은 compose.yaml과 맞춘다.
  */
 @TestConfiguration(proxyBeanMethods = false)
-class TestcontainersConfiguration {
+public class TestcontainersConfiguration {
 
 	@Bean
 	@ServiceConnection
