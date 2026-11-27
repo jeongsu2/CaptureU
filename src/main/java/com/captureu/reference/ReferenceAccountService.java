@@ -23,7 +23,10 @@ import com.captureu.instagram.graph.GraphApiException;
 @Service
 public class ReferenceAccountService {
 
-	public static final int MAX_REFERENCES = 2;
+	/** 1~3개. 3개면 "3개 중 2개 이상에서 공통으로 잘된 패턴"을 근거로 쓸 수 있어 권장한다. */
+	public static final int MIN_REFERENCES = 1;
+	public static final int MAX_REFERENCES = 3;
+	public static final int RECOMMENDED_REFERENCES = 3;
 
 	private final ReferenceAccountRepository repository;
 	private final ReferenceAccountReader reader;
@@ -47,7 +50,7 @@ public class ReferenceAccountService {
 	 * 외부 조회는 트랜잭션 밖에서 하고, 모두 통과하면 한 트랜잭션으로 바꾼다.
 	 */
 	public List<ReferenceAccount> replace(String ownerIgUserId, List<String> rawUsernames) {
-		// 같은 사용자가 동시에 바꾸면 2개 제한이 깨지거나 유니크 키가 충돌한다 (버튼 두 번 클릭 등)
+		// 같은 사용자가 동시에 바꾸면 개수 제한이 깨지거나 유니크 키가 충돌한다 (버튼 두 번 클릭 등)
 		if (!inFlight.add(ownerIgUserId)) {
 			throw new ReferenceUpdateInProgressException();
 		}
@@ -73,6 +76,10 @@ public class ReferenceAccountService {
 		}
 		if (usernames.size() > MAX_REFERENCES) {
 			rejections.add(new ReferenceRejection(null, "TOO_MANY", "참고 계정은 최대 %d개예요".formatted(MAX_REFERENCES)));
+		}
+		if (usernames.isEmpty() && rejections.isEmpty()) {
+			rejections.add(new ReferenceRejection(null, "TOO_FEW", "참고 계정을 %d개 이상 넣어 주세요 (%d개 권장)"
+				.formatted(MIN_REFERENCES, RECOMMENDED_REFERENCES)));
 		}
 		if (!rejections.isEmpty()) {
 			throw new ReferenceAccountRejectedException(rejections);

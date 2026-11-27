@@ -220,6 +220,8 @@ class AnalysisServiceIntegrationTest {
 			assertThat(card.thumbnailUrl()).isEqualTo("https://t");
 		});
 		assertThat(report.ownSummary().medianSkipRate()).isEqualTo(50.0);
+		// 참고 계정이 권장(3개)보다 적으면 치우칠 수 있다고 표시
+		assertThat(report.fewReferences()).isTrue();
 		assertThat(report.references()).singleElement().satisfies(r -> {
 			assertThat(r.cards()).extracting(ReportService.PostCard::mediaId).containsExactly("x3");
 			assertThat(r.cards().get(0).skipRate()).isNull();
