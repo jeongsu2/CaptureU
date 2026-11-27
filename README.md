@@ -71,6 +71,14 @@ curl -X POST http://localhost:8080/api/analyses
 
 응답에 게시물 수, 인사이트를 못 받은 게시물 수, 참고 계정별 수집 결과, 외부 API 호출 수, 걸린 시간(ms)이 나온다. 결과는 `GET /api/analyses/{id}`로 다시 볼 수 있다.
 
+4. 비교 리포트를 본다
+
+```bash
+curl http://localhost:8080/api/analyses/{id}/report
+```
+
+계정마다 게시 7일 이상 릴스의 조회수 중앙값과, 중앙값의 2배 이상인 아웃라이어 카드(썸네일, 캡션 첫 줄, 배수)가 나온다. 내 계정은 스킵률·저장률을 아웃라이어와 나머지로 나눠 비교한다. 배수만 보려면 `/api/analyses/{id}/outliers`.
+
 ## 진행
 
 작업은 [Issues](../../issues)와 [Milestones](../../milestones)로 관리한다.

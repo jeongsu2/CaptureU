@@ -24,10 +24,12 @@ class AnalysisController {
 
 	private final AnalysisService analysisService;
 	private final OutlierService outlierService;
+	private final ReportService reportService;
 
-	AnalysisController(AnalysisService analysisService, OutlierService outlierService) {
+	AnalysisController(AnalysisService analysisService, OutlierService outlierService, ReportService reportService) {
 		this.analysisService = analysisService;
 		this.outlierService = outlierService;
+		this.reportService = reportService;
 	}
 
 	@PostMapping
@@ -45,6 +47,12 @@ class AnalysisController {
 	@GetMapping("/{id}/outliers")
 	AnalysisOutliers outliers(@PathVariable Long id) {
 		return outlierService.compute(id);
+	}
+
+	/** 비교 리포트: 계정별 아웃라이어 카드와 내 계정 스킵률·저장률 요약. */
+	@GetMapping("/{id}/report")
+	ReportService.AnalysisReport report(@PathVariable Long id) {
+		return reportService.build(id);
 	}
 
 	@ExceptionHandler(AnalysisNotFoundException.class)
