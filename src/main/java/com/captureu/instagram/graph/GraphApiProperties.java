@@ -29,4 +29,12 @@ public record GraphApiProperties(
 	public boolean hasAccessToken() {
 		return accessToken != null && !accessToken.isBlank();
 	}
+
+	/** record 기본 toString은 모든 값을 찍으므로 토큰을 가린다. */
+	@Override
+	public String toString() {
+		return "GraphApiProperties[baseUrl=%s, apiVersion=%s, accessToken=%s, igUserId=%s, connectTimeout=%s, readTimeout=%s, maxRetries=%d, retryDelay=%s]"
+			.formatted(baseUrl, apiVersion, hasAccessToken() ? "***" : "(없음)", igUserId, connectTimeout,
+					readTimeout, maxRetries, retryDelay);
+	}
 }

@@ -78,10 +78,10 @@ class GraphApiClientTest {
 	}
 
 	@Test
-	void 호출_한도_초과는_다시_시도해서_성공하면_결과를_돌려준다() {
+	void 일시_장애는_다시_시도해서_성공하면_결과를_돌려준다() {
 		server.expect(once(), requestTo(Matchers.startsWith(MEDIA_URL)))
-			.andRespond(withStatus(HttpStatus.FORBIDDEN).contentType(MediaType.APPLICATION_JSON)
-				.body(error(80002, null, "Application request limit reached")));
+			.andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).contentType(MediaType.APPLICATION_JSON)
+				.body("{\"error\":{\"message\":\"temporary\",\"code\":100,\"is_transient\":true}}"));
 		server.expect(once(), requestTo(Matchers.startsWith(MEDIA_URL)))
 			.andRespond(withSuccess("{\"data\":[]}", MediaType.APPLICATION_JSON));
 
@@ -89,6 +89,71 @@ class GraphApiClientTest {
 
 		assertThat(result.path("data").isArray()).isTrue();
 		server.verify();
+	}
+
+	@Test
+	void 호출_한도_초과는_바로_다시_시도하지_않는다() {
+		server.expect(once(), requestTo(Matchers.startsWith(MEDIA_URL)))
+			.andRespond(withStatus(HttpStatus.FORBIDDEN).contentType(MediaType.APPLICATION_JSON)
+				.body(error(80002, null, "Application request limit reached")));
+
+		assertThatThrownBy(() -> client.get("123/media", Map.of()))
+			.isInstanceOfSatisfying(GraphApiException.class, e -> {
+				assertThat(e.getType()).isEqualTo(GraphApiErrorType.RATE_LIMITED);
+				assertThat(e.getAttempts()).isEqualTo(1);
+			});
+		server.verify();
+	}
+
+	@Test
+	void 값의_더하기_기호는_공백으로_읽히지_않게_인코딩한다() {
+		server.expect(once(), requestTo(Matchers.containsString("since=2026-11-01T00:00:00%2B09:00")))
+			.andRespond(withSuccess("{\"data\":[]}", MediaType.APPLICATION_JSON));
+
+		client.get("123/media", Map.of("since", "2026-11-01T00:00:00+09:00"));
+
+		server.verify();
+	}
+
+	@Test
+	void 돌려주는_응답의_paging_next에서도_토큰을_가린다() {
+		server.expect(once(), requestTo(Matchers.startsWith(MEDIA_URL)))
+			.andRespond(withSuccess("""
+					{"data":[],"paging":{"cursors":{"after":"C1"},"next":"https://graph.facebook.com/v27.0/123/media?access_token=%s&after=C1"},
+					 "business_discovery":{"media":{"paging":{"next":"https://x?access_token=%s"}}}}
+					""".formatted(TOKEN, TOKEN), MediaType.APPLICATION_JSON));
+
+		JsonNode result = client.get("123/media", Map.of());
+
+		assertThat(result.toString()).doesNotContain(TOKEN);
+		assertThat(result.path("paging").path("cursors").path("after").asString()).isEqualTo("C1");
+		assertThat(result.path("paging").has("next")).isTrue();
+	}
+
+	@Test
+	void 성공_응답인데_JSON이_아니면_일시_장애로_보고_다시_시도한다() {
+		server.expect(times(4), requestTo(Matchers.startsWith(MEDIA_URL)))
+			.andRespond(withSuccess("<html>gateway</html>", MediaType.TEXT_HTML));
+
+		assertThatThrownBy(() -> client.get("123/media", Map.of()))
+			.isInstanceOfSatisfying(GraphApiException.class, e -> {
+				assertThat(e.getType()).isEqualTo(GraphApiErrorType.TEMPORARY);
+				assertThat(e.getAttempts()).isEqualTo(4);
+			});
+	}
+
+	@Test
+	void 프로그래밍_오류나_Error는_감추지_않고_그대로_올린다() {
+		// 기대한 요청이 없는데 호출하면 MockRestServiceServer가 AssertionError를 던진다
+		assertThatThrownBy(() -> client.get("123/media", Map.of())).isInstanceOf(AssertionError.class);
+	}
+
+	@Test
+	void 설정값을_출력해도_토큰이_보이지_않는다() {
+		GraphApiProperties properties = new GraphApiProperties("https://graph.facebook.com", "v27.0", TOKEN, "123",
+				Duration.ofSeconds(1), Duration.ofSeconds(1), 3, Duration.ofMillis(1));
+
+		assertThat(properties.toString()).doesNotContain(TOKEN).contains("accessToken=***");
 	}
 
 	@Test

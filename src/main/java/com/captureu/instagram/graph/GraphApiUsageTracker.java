@@ -46,21 +46,39 @@ public class GraphApiUsageTracker {
 		});
 	}
 
+	/** 사용 사례 한도와 앱 한도 헤더를 모두 읽고, 더 높은 쪽을 쓴다 (앱 한도 초과는 x-app-usage에만 보인다). */
 	Optional<GraphApiUsage> parse(HttpHeaders headers) {
+		GraphApiUsage worst = null;
+		String buc = headers.getFirst(BUSINESS_USE_CASE_HEADER);
+		if (buc != null) {
+			worst = higher(worst, readOrNull(buc, true));
+		}
+		String app = headers.getFirst(APP_USAGE_HEADER);
+		if (app != null) {
+			worst = higher(worst, readOrNull(app, false));
+		}
+		return Optional.ofNullable(worst);
+	}
+
+	private GraphApiUsage readOrNull(String header, boolean businessUseCase) {
 		try {
-			String buc = headers.getFirst(BUSINESS_USE_CASE_HEADER);
-			if (buc != null) {
-				return worstOf(objectMapper.readTree(buc));
-			}
-			String app = headers.getFirst(APP_USAGE_HEADER);
-			if (app != null) {
-				return Optional.of(toUsage(objectMapper.readTree(app)));
-			}
+			JsonNode root = objectMapper.readTree(header);
+			return businessUseCase ? worstOf(root).orElse(null) : toUsage(root);
 		}
 		catch (RuntimeException e) {
 			log.debug("호출 한도 헤더를 읽지 못함: {}", e.getMessage());
+			return null;
 		}
-		return Optional.empty();
+	}
+
+	private static GraphApiUsage higher(GraphApiUsage a, GraphApiUsage b) {
+		if (a == null) {
+			return b;
+		}
+		if (b == null) {
+			return a;
+		}
+		return b.maxPercent() > a.maxPercent() ? b : a;
 	}
 
 	/** {"<business id>": [{"type":"instagram", "call_count":1, ...}]} 에서 가장 높은 값을 고른다. */

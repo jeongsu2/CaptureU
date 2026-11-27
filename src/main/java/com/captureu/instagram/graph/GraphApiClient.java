@@ -14,15 +14,19 @@ import org.springframework.core.retry.RetryTemplate;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * 모든 Instagram Graph API 호출이 지나가는 클라이언트.
  * <ul>
- * <li>에러를 {@link GraphApiErrorType}으로 분류하고, 재시도해도 되는 에러만 지수 백오프로 다시 시도한다.</li>
- * <li>예외 메시지와 로그에서 access_token을 가린다.</li>
+ * <li>에러를 {@link GraphApiErrorType}으로 분류하고, 일시 장애만 지수 백오프로 바로 다시 시도한다.
+ * 호출 한도 초과는 몇 분 이상 지속되므로 바로 재시도하지 않는다.</li>
+ * <li>예외 메시지, 로그, 돌려주는 응답에서 access_token을 가린다.</li>
  * <li>응답 헤더의 호출 한도 사용량을 {@link GraphApiUsageTracker}에 기록한다.</li>
  * </ul>
  */
@@ -51,9 +55,10 @@ public class GraphApiClient {
 	}
 
 	/**
-	 * GET 호출. 실패하면 {@link GraphApiException}을 던진다.
+	 * GET 호출. API 에러는 {@link GraphApiException}으로 던진다.
+	 * 돌려주는 JSON의 paging.next/previous URL에 들어 있던 토큰은 가려져 있다 (다음 페이지는 커서로 요청할 것).
 	 *
-	 * @param path   버전 뒤 경로. 예: "{ig-user-id}/media"
+	 * @param path   버전 뒤 경로. 예: "17841400000000000/media"
 	 * @param params 쿼리 파라미터 (access_token은 자동으로 붙는다)
 	 */
 	public JsonNode get(String path, Map<String, String> params) {
@@ -70,13 +75,24 @@ public class GraphApiClient {
 			});
 		}
 		catch (RetryException e) {
-			Throwable last = e.getLastException() != null ? e.getLastException() : e.getCause();
-			if (last instanceof GraphApiException g) {
-				throw g.withAttempts(attempts[0]);
-			}
-			throw new GraphApiException(GraphApiErrorType.UNKNOWN, 0, null, null, mask(String.valueOf(last)))
-				.withAttempts(attempts[0]);
+			throw unwrap(e, attempts[0]);
 		}
+	}
+
+	private RuntimeException unwrap(RetryException e, int attempts) {
+		Throwable last = e.getCause();
+		if (Thread.currentThread().isInterrupted()) {
+			return new IllegalStateException("Graph API 재시도 대기 중 스레드가 중단됨", last);
+		}
+		if (last instanceof Error error) {
+			throw error;
+		}
+		if (last instanceof GraphApiException g) {
+			return g.withAttempts(attempts);
+		}
+		// 프로그래밍 오류 등은 감추지 않고 원래 예외를 그대로 올린다.
+		// (요청 URL이 들어간 RestClientException은 callOnce에서 이미 가린 예외로 바꿨다)
+		return last instanceof RuntimeException r ? r : new IllegalStateException(last);
 	}
 
 	private JsonNode callOnce(URI uri) {
@@ -88,10 +104,11 @@ public class GraphApiClient {
 				if (status >= 400) {
 					throw toException(status, body);
 				}
-				JsonNode json = objectMapper.readTree(body);
+				JsonNode json = parseSuccessBody(status, body);
 				if (json.has("error")) {
 					throw toException(status, body);
 				}
+				maskPagingUrls(json);
 				return json;
 			});
 		}
@@ -105,15 +122,30 @@ public class GraphApiClient {
 		}
 	}
 
+	/** 2xx인데 본문이 비었거나 JSON이 아니면(게이트웨이 오류 페이지 등) 일시 장애로 본다. */
+	private JsonNode parseSuccessBody(int status, String body) {
+		if (body.isBlank()) {
+			throw new GraphApiException(GraphApiErrorType.TEMPORARY, status, null, null, "빈 응답 본문");
+		}
+		try {
+			return objectMapper.readTree(body);
+		}
+		catch (JacksonException e) {
+			throw new GraphApiException(GraphApiErrorType.TEMPORARY, status, null, null, "JSON이 아닌 응답 본문");
+		}
+	}
+
 	private GraphApiException toException(int status, String body) {
 		Integer code = null;
 		Integer subcode = null;
+		boolean isTransient = false;
 		String message = body;
 		try {
 			JsonNode error = objectMapper.readTree(body).path("error");
 			if (!error.isMissingNode()) {
 				code = error.hasNonNull("code") ? error.get("code").asInt() : null;
 				subcode = error.hasNonNull("error_subcode") ? error.get("error_subcode").asInt() : null;
+				isTransient = error.path("is_transient").asBoolean(false);
 				message = error.path("message").asString("");
 			}
 		}
@@ -121,18 +153,42 @@ public class GraphApiClient {
 			// JSON이 아닌 응답(게이트웨이 오류 페이지 등)은 본문 앞부분만 남긴다
 			message = body.length() > 200 ? body.substring(0, 200) : body;
 		}
-		GraphApiErrorType type = GraphApiErrorClassifier.classify(status, code, subcode);
+		GraphApiErrorType type = GraphApiErrorClassifier.classify(status, code, subcode, isTransient);
 		return new GraphApiException(type, status, code, subcode, mask(message));
 	}
 
+	/** 응답 어디에 있든 paging.next/previous URL의 토큰을 가린다. 호출자가 응답을 로그에 남겨도 새지 않게 한다. */
+	private void maskPagingUrls(JsonNode node) {
+		if (node instanceof ObjectNode obj) {
+			JsonNode paging = obj.get("paging");
+			if (paging instanceof ObjectNode p) {
+				for (String key : new String[] { "next", "previous" }) {
+					if (p.hasNonNull(key)) {
+						p.put(key, mask(p.get(key).asString()));
+					}
+				}
+			}
+		}
+		for (JsonNode child : node.values()) {
+			maskPagingUrls(child);
+		}
+	}
+
+	/**
+	 * 값은 직접 인코딩한다. 스프링의 쿼리 인코딩은 '+'를 그대로 두는데, 서버는 이를 공백으로 읽으므로
+	 * (예: since=...+09:00) '+'만 따로 %2B로 바꾼다. fields 값의 {}는 인코딩되고 (), 쉼표는 그대로 둔다.
+	 */
 	private URI buildUri(String path, Map<String, String> params) {
 		UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
 			.pathSegment(properties.apiVersion())
 			.path("/" + path);
-		params.forEach(builder::queryParam);
-		builder.queryParam("access_token", properties.accessToken());
-		// fields 값에 {}가 들어가므로(예: media.limit(50){caption}) 템플릿으로 해석하지 않고 그대로 인코딩한다
-		return builder.build().encode().toUri();
+		params.forEach((key, value) -> builder.queryParam(encode(key), encode(value)));
+		builder.queryParam("access_token", encode(properties.accessToken()));
+		return builder.build(true).toUri();
+	}
+
+	private static String encode(String value) {
+		return UriUtils.encodeQueryParam(value, StandardCharsets.UTF_8).replace("+", "%2B");
 	}
 
 	private String mask(String text) {

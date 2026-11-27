@@ -21,14 +21,22 @@ class GraphApiErrorClassifierTest {
 			"400, 10,    null,    PERMISSION_DENIED",
 			"400, 200,   null,    PERMISSION_DENIED",
 			"400, 110,   2207013, TARGET_NOT_FOUND",
+			"400, 100,   33,      TARGET_NOT_FOUND",
 			"400, 100,   null,    INVALID_REQUEST",
 			"400, 9999,  null,    UNKNOWN" })
 	void 에러_코드별_분류(int http, Integer code, Integer subcode, GraphApiErrorType expected) {
 		assertThat(GraphApiErrorClassifier.classify(http, code, subcode)).isEqualTo(expected);
 	}
 
+	@org.junit.jupiter.api.Test
+	void Meta가_일시적이라고_알려준_에러는_TEMPORARY다() {
+		assertThat(GraphApiErrorClassifier.classify(400, 100, null, true)).isEqualTo(GraphApiErrorType.TEMPORARY);
+		// 토큰 무효는 일시적이라고 해도 재시도하지 않는다
+		assertThat(GraphApiErrorClassifier.classify(400, 190, null, true)).isEqualTo(GraphApiErrorType.TOKEN_INVALID);
+	}
+
 	@ParameterizedTest
-	@CsvSource({ "RATE_LIMITED, true", "TEMPORARY, true", "TOKEN_INVALID, false", "TARGET_NOT_FOUND, false",
+	@CsvSource({ "RATE_LIMITED, false", "TEMPORARY, true", "TOKEN_INVALID, false", "TARGET_NOT_FOUND, false",
 			"INVALID_REQUEST, false" })
 	void 재시도_여부(GraphApiErrorType type, boolean retryable) {
 		assertThat(type.isRetryable()).isEqualTo(retryable);
