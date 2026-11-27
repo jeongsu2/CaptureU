@@ -83,7 +83,38 @@ public class ReportService {
 			.filter(Objects::nonNull)
 			.toList();
 		return new AccountReport(result.username(), result.mine(), o.judgedCount(), o.excludedCount(),
-				o.medianViews(), o.meanViews(), o.outliers().size(), cards, o.youngMediaIds().size(), o.lowSample());
+				o.medianViews(), o.meanViews(), o.outliers().size(), cards, o.youngMediaIds().size(), o.lowSample(),
+				hookTypeStats(o, media));
+	}
+
+	/**
+	 * 첫 줄 유형별로 판정한 릴스 수와 그중 아웃라이어 수 (#12). "이 계정에서는 어떤 유형의 첫 줄이 잘됐나"를 본다.
+	 * 광고 게시물은 성과가 다를 수 있어 따로 센다.
+	 */
+	static List<HookTypeStat> hookTypeStats(AccountOutliers o, Map<String, IgMedia> media) {
+		Map<CaptionHook.HookType, int[]> counts = new java.util.EnumMap<>(CaptionHook.HookType.class);
+		for (ScoredPost p : o.posts()) {
+			IgMedia m = media.get(p.mediaId());
+			if (m == null || m.getHookType() == null) {
+				continue;
+			}
+			int[] c = counts.computeIfAbsent(m.getHookType(), k -> new int[3]);
+			c[0]++;
+			if (p.outlier()) {
+				c[1]++;
+			}
+			if (m.isAdDisclosure()) {
+				c[2]++;
+			}
+		}
+		return counts.entrySet()
+			.stream()
+			.map(e -> new HookTypeStat(e.getKey(), e.getValue()[0], e.getValue()[1],
+					OutlierCalculator.percent(e.getValue()[1], e.getValue()[0]), e.getValue()[2]))
+			.sorted(java.util.Comparator.comparing(HookTypeStat::outlierRate,
+					java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
+				.thenComparing(HookTypeStat::count, java.util.Comparator.reverseOrder()))
+			.toList();
 	}
 
 	private static PostCard toCard(ScoredPost p, MediaMetricSnapshot s, IgMedia m) {
@@ -91,7 +122,7 @@ public class ReportService {
 			return null;
 		}
 		return new PostCard(m.getId(), m.getPermalink(), m.getThumbnailUrl(), m.getThumbnailUrlExpiresAt(),
-				m.getCaptionFirstLine(), m.getPostedAt(), p.views(), p.multiple(), p.commentRate(), s.getLikeCount(),
+				m.getCaptionFirstLine(), m.getCaptionHook(), m.getHookType(), m.isAdDisclosure(), m.getCallToAction(), m.getPostedAt(), p.views(), p.multiple(), p.commentRate(), s.getLikeCount(),
 				s.getCommentsCount(), s.getSaved(), s.getShares(), s.getSkipRate(), s.getAvgWatchTimeMs());
 	}
 
@@ -143,14 +174,25 @@ public class ReportService {
 	 */
 	public record AccountReport(String username, boolean mine, int judgedCount, int excludedCount,
 			Double medianViews, Double meanViews, int outlierCount, List<PostCard> cards, int youngCount,
-			boolean lowSample) {
+			boolean lowSample, List<HookTypeStat> hookTypes) {
+	}
+
+	/**
+	 * @param count        이 유형의 판정한 릴스 수
+	 * @param outlierCount 그중 아웃라이어 수
+	 * @param outlierRate  아웃라이어 비율(%)
+	 * @param adCount      그중 광고 표시가 있는 수
+	 */
+	public record HookTypeStat(CaptionHook.HookType type, int count, int outlierCount, Double outlierRate,
+			int adCount) {
 	}
 
 	/**
 	 * 아웃라이어 카드. 썸네일 URL은 며칠 뒤 만료된다(thumbnailExpiresAt). 저장·공유·스킵률은 내 계정만 있다.
 	 */
 	public record PostCard(String mediaId, String permalink, String thumbnailUrl, Instant thumbnailExpiresAt,
-			String captionFirstLine, Instant postedAt, int views, Double multiple, Double commentRate, Integer likes,
+			String captionFirstLine, String captionHook, CaptionHook.HookType hookType, boolean adDisclosure,
+			CaptionHook.CallToAction callToAction, Instant postedAt, int views, Double multiple, Double commentRate, Integer likes,
 			Integer comments, Integer saved, Integer shares, Double skipRate, Integer avgWatchTimeMs) {
 	}
 
