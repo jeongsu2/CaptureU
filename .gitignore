@@ -3,11 +3,31 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
-# IDE
+HELP.md
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# IDE (IntelliJ는 build.gradle을 읽어 프로젝트를 구성하므로 설정 폴더는 올리지 않는다)
 .idea/
 *.iml
+*.iws
+*.ipr
 .vscode/
 out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+# STS / Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
 
 # OS
 .DS_Store

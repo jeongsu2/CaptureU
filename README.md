@@ -31,9 +31,26 @@
 
 자세한 확인 결과: [docs/spike-meta-api.md](docs/spike-meta-api.md)
 
-## 기술 스택 (계획)
+## 기술 스택
 
-Java 21, Spring Boot 3, Spring Data JPA, MySQL, Redis, Spring Batch, Kafka, Prometheus, Grafana, Docker, GitHub Actions, k6, LLM API
+- 지금: Java 21, Spring Boot 4.1, Spring Data JPA, MySQL 8.4, Redis 8.4, Flyway, Docker Compose, Testcontainers, GitHub Actions
+- 계획: Spring Batch, Kafka, Prometheus, Grafana, k6, LLM API
+
+## 로컬 실행
+
+필요한 것: JDK 21, Docker Desktop (실행 중이어야 함)
+
+1. IntelliJ → **Open** → 이 폴더 선택 → Gradle 프로젝트로 불러오기 (Project SDK 21)
+2. `CaptureuApplication`을 실행 (Run)
+   - `compose.yaml`의 MySQL, Redis가 자동으로 뜨고 연결된다
+3. http://localhost:8080/actuator/health 에서 `db`, `redis`가 `UP`인지 확인
+
+터미널에서:
+
+```bash
+./gradlew bootRun   # 실행
+./gradlew test      # 테스트 (Testcontainers로 MySQL, Redis를 따로 띄움)
+```
 
 ## 진행
 
