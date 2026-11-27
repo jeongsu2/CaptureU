@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+out/
+
+# OS
+.DS_Store
+
+# 비밀값: 토큰, 환경변수 파일은 절대 커밋하지 않는다
+.env
+.env.*
+!.env.example
+*.token
+secrets/
+
+# 로컬 실행 결과 (API 응답 원본에는 토큰과 계정 데이터가 들어 있을 수 있음)
+scripts/out/
+*.log
