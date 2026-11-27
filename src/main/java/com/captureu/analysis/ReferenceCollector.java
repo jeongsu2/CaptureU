@@ -44,28 +44,30 @@ class ReferenceCollector {
 		List<CollectedReference> results = new ArrayList<>();
 		for (ReferenceAccount reference : referenceRepository.findByOwnerIgUserIdOrderByIdAsc(ownerIgUserId)) {
 			String username = reference.getUsername();
-			int callsBefore = ctx.callCount();
+			// 내 계정 수집과 동시에 돌므로, 참고 계정마다 호출 수를 따로 세고 끝에 합친다
+			ReadContext refCtx = new ReadContext();
 			long start = System.nanoTime();
 			try {
-				ReferenceAccountData data = reader.read(ownerIgUserId, username, maxMedia, ctx);
-				results.add(new CollectedReference(username, data, null, null, ctx.callCount() - callsBefore,
-						elapsedMs(start)));
+				ReferenceAccountData data = reader.read(ownerIgUserId, username, maxMedia, refCtx);
+				results.add(new CollectedReference(username, data, null, null, refCtx.callCount(), elapsedMs(start)));
 			}
 			catch (GraphApiException e) {
 				if (e.getType() == GraphApiErrorType.TOKEN_INVALID || e.getType() == GraphApiErrorType.RATE_LIMITED) {
+					ctx.addCalls(refCtx.callCount());
 					throw e;
 				}
 				log.info("참고 계정 @{} 수집 실패: {}", username, e.getMessage());
 				results.add(new CollectedReference(username, null, e.getType().name(),
 						"code=%s subcode=%s: %s".formatted(e.getCode(), e.getSubcode(), e.getDetail()),
-						ctx.callCount() - callsBefore, elapsedMs(start)));
+						refCtx.callCount(), elapsedMs(start)));
 			}
 			catch (RuntimeException e) {
 				// 참고 계정 하나 때문에 내 계정 분석까지 버리지 않는다
 				log.warn("참고 계정 @{} 수집 중 예상하지 못한 오류", username, e);
 				results.add(new CollectedReference(username, null, "UNEXPECTED", e.getClass().getSimpleName(),
-						ctx.callCount() - callsBefore, elapsedMs(start)));
+						refCtx.callCount(), elapsedMs(start)));
 			}
+			ctx.addCalls(refCtx.callCount());
 		}
 		return results;
 	}

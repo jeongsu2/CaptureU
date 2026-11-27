@@ -2,8 +2,16 @@ package com.captureu.analysis;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import jakarta.annotation.PreDestroy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +20,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.captureu.analysis.OwnAccountCollector.CollectedAccount;
+import com.captureu.analysis.ReferenceCollector.CollectedReference;
 import com.captureu.instagram.account.ReadContext;
 import com.captureu.instagram.graph.GraphApiException;
 import com.captureu.instagram.graph.GraphApiProperties;
@@ -40,6 +50,14 @@ public class AnalysisService {
 	 * 지금은 서버가 한 대라 메모리로 막는다. 서버를 여러 대로 늘리면 분산 락으로 바꾼다.
 	 */
 	private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+
+	/** 참고 계정 수집처럼 요청 처리와 동시에 도는 작업용. 외부 호출을 기다리는 작업이라 가상 스레드를 쓴다. */
+	private final ExecutorService backgroundExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+	@PreDestroy
+	void shutdownBackgroundExecutor() {
+		backgroundExecutor.shutdownNow();
+	}
 
 	AnalysisService(OwnAccountCollector collector, ReferenceCollector referenceCollector,
 			AnalysisReferenceRepository analysisReferenceRepository, AnalysisWriter writer,
@@ -89,8 +107,18 @@ public class AnalysisService {
 		ReadContext ctx = new ReadContext();
 		try {
 			Instant collectedAt = Instant.now(clock);
-			var own = collector.collect(igUserId, ctx);
-			var references = referenceCollector.collect(igUserId, ctx);
+			// 참고 계정은 내 계정과 서로 기다릴 이유가 없으므로 동시에 모은다 (#30)
+			CompletableFuture<List<CollectedReference>> referencesFuture = CompletableFuture
+				.supplyAsync(() -> referenceCollector.collect(igUserId, ctx), backgroundExecutor);
+			CollectedAccount own;
+			try {
+				own = collector.collect(igUserId, ctx);
+			}
+			catch (RuntimeException | Error e) {
+				referencesFuture.cancel(true);
+				throw e;
+			}
+			List<CollectedReference> references = join(referencesFuture);
 			analysis = writer.complete(analysis.getId(), own, references, ctx.callCount(), collectedAt,
 					Instant.now(clock));
 			log.info("분석 {} 완료: 게시물 {}개, 인사이트 실패 {}개, 참고 계정 {}개, 외부 호출 {}회, {}ms", analysis.getId(),
@@ -114,6 +142,23 @@ public class AnalysisService {
 			throw e;
 		}
 		return toResponse(analysis);
+	}
+
+	/** CompletableFuture가 감싼 예외를 풀어 원래 예외(GraphApiException 등)로 올린다. */
+	private static <T> T join(CompletableFuture<T> future) {
+		try {
+			return future.join();
+		}
+		catch (CompletionException | CancellationException e) {
+			Throwable cause = e.getCause() != null ? e.getCause() : e;
+			if (cause instanceof RuntimeException r) {
+				throw r;
+			}
+			if (cause instanceof Error err) {
+				throw err;
+			}
+			throw new IllegalStateException(cause);
+		}
 	}
 
 	@Transactional(readOnly = true)
