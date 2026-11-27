@@ -1,9 +1,11 @@
 package com.captureu.recommendation;
 
+import com.captureu.llm.LlmPricing;
+
+import com.captureu.llm.LlmProperties;
+
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import com.anthropic.client.AnthropicClient;
@@ -18,6 +20,7 @@ import com.anthropic.models.messages.StructuredOutputConfig;
 import com.captureu.analysis.CaptionHook.HookType;
 import com.captureu.common.Texts;
 import com.captureu.profile.ProfileService.Concepts;
+import com.captureu.thumbnail.ThumbnailService.ThumbnailSignal;
 import com.captureu.recommendation.PatternAnalyzer.HookPattern;
 import com.captureu.recommendation.PatternAnalyzer.PatternSummary;
 import com.captureu.recommendation.RecommendationDraft.HookCandidate;
@@ -30,7 +33,7 @@ import com.captureu.recommendation.RecommendationDraft.ThumbnailPlan;
  */
 class ClaudeHookWriter implements AutoCloseable {
 
-	static final String PROMPT_VERSION = "hook-v2";
+	static final String PROMPT_VERSION = "hook-v3";
 	private static final String FALLBACK_BETA = "server-side-fallback-2026-07-01";
 	private static final int MAX_HOOK_LENGTH = 100;
 	private static final int MAX_RATIONALE_LENGTH = 200;
@@ -39,14 +42,6 @@ class ClaudeHookWriter implements AutoCloseable {
 	/** 다른 크리에이터 캡션이 프롬프트 태그를 닫고 지시를 끼워 넣지 못하게 꺾쇠를 바꾼다. */
 	private static final java.util.regex.Pattern ANGLE = java.util.regex.Pattern.compile("[<>]");
 	private static final java.util.regex.Pattern HASHTAG = java.util.regex.Pattern.compile("#\\S+");
-
-	/** 백만 토큰당 달러 (입력, 출력). 거절 시 서버가 다른 모델로 넘기면 응답의 model로 계산한다. */
-	private static final Map<String, double[]> PRICES = Map.of(
-			"claude-opus-5-5", new double[] { 4, 20 },
-			"claude-opus-5", new double[] { 5, 25 },
-			"claude-opus-4-8", new double[] { 5, 25 },
-			"claude-sonnet-5-5", new double[] { 2, 10 },
-			"claude-haiku-5-5", new double[] { 0.1, 0.5 });
 
 	static final String SYSTEM_PROMPT = """
 			너는 인스타그램 릴스 크리에이터를 돕는 카피라이터다.
@@ -82,7 +77,7 @@ class ClaudeHookWriter implements AutoCloseable {
 		return client != null;
 	}
 
-	LlmDraft write(String topic, PatternSummary summary, Concepts concepts) {
+	LlmDraft write(String topic, PatternSummary summary, Concepts concepts, List<ThumbnailSignal> thumbnails) {
 		if (client == null) {
 			throw new IllegalStateException("ANTHROPIC_API_KEY가 없습니다");
 		}
@@ -95,7 +90,7 @@ class ClaudeHookWriter implements AutoCloseable {
 				// 짧은 카피 작성이라 깊게 생각할 필요가 적고, 사용자가 기다리는 요청이라 빠른 쪽을 고른다
 				.effort(OutputConfig.Effort.LOW)
 				.build())
-			.addUserMessage(userPrompt(topic, summary, concepts));
+			.addUserMessage(userPrompt(topic, summary, concepts, thumbnails));
 		if (properties.refusalFallback()) {
 			builder.putAdditionalHeader("anthropic-beta", FALLBACK_BETA)
 				.putAdditionalBodyProperty("fallbacks", JsonValue.from("default"));
@@ -158,16 +153,12 @@ class ClaudeHookWriter implements AutoCloseable {
 	}
 
 	static BigDecimal cost(String model, long inputTokens, long outputTokens) {
-		double[] price = PRICES.get(model);
-		if (price == null) {
-			return null;
-		}
-		double usd = (inputTokens * price[0] + outputTokens * price[1]) / 1_000_000.0;
-		return BigDecimal.valueOf(usd).setScale(6, RoundingMode.HALF_UP);
+		return LlmPricing.cost(model, inputTokens, outputTokens);
 	}
 
 	/** 분석 결과를 사람이 읽는 형태로 정리한다. 참고 계정 이름과 숫자는 근거로 그대로 쓰게 한다. */
-	static String userPrompt(String topic, PatternSummary summary, Concepts concepts) {
+	static String userPrompt(String topic, PatternSummary summary, Concepts concepts,
+			List<ThumbnailSignal> thumbnails) {
 		StringBuilder sb = new StringBuilder();
 		sb.append("<topic>").append(safe(topic)).append("</topic>\n");
 		if (concepts != null) {
@@ -200,6 +191,16 @@ class ClaudeHookWriter implements AutoCloseable {
 		}
 		if (summary.saveShareCommon()) {
 			sb.append("여러 계정의 잘된 게시물이 첫 줄 앞에 \"(저장•공유)\" 같은 머리말을 붙였다. 후보 1~2개에 써도 된다.\n");
+		}
+		if (thumbnails != null && !thumbnails.isEmpty()) {
+			sb.append("잘된 썸네일의 특징 (썸네일 이미지 분석, 우선순위 순). 썸네일 구성안은 이 근거를 따른다:\n");
+			int j = 1;
+			for (ThumbnailSignal t : thumbnails) {
+				sb.append(j++).append(". [").append(t.scope()).append("] ").append(safe(t.evidence())).append('\n');
+			}
+		}
+		else {
+			sb.append("썸네일 이미지 분석 결과 없음: 썸네일 구성안은 일반 원칙으로 쓰고 rationale에 그렇게 밝힌다.\n");
 		}
 		summary.notes().forEach(n -> sb.append("참고: ").append(n).append('\n'));
 		return sb.toString();

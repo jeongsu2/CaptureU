@@ -184,8 +184,48 @@ async function showReport(id) {
     box.prepend(el('p', 'hint', '참고 계정이 3개보다 적어 한 계정 스타일에 치우칠 수 있어요.'));
   }
   ['#step-report', '#step-recommend'].forEach((s) => $(s).classList.remove('hidden'));
-  await loadEffects(id);
+  await Promise.all([loadEffects(id), loadThumbnails(id)]);
 }
+
+// 썸네일 특징 (#11)
+async function loadThumbnails(analysisId) {
+  const list = $('#thumbs-signals');
+  list.replaceChildren();
+  try {
+    const c = await api('GET', `/api/analyses/${analysisId}/thumbnails`);
+    const tagged = c.accounts.reduce((n, a) => n + a.outlierTagged + a.otherTagged, 0);
+    if (!tagged) return;
+    if (!c.signals.length) {
+      list.append(el('li', null, `썸네일 ${tagged}개를 분석했지만 잘된 썸네일만의 뚜렷한 특징은 아직 없어요.`));
+      return;
+    }
+    c.signals.forEach((s) => list.append(el('li', null, s.evidence)));
+  } catch (e) {
+    setMsg($('#thumbs-msg'), e.message, true);
+  }
+}
+
+$('#thumbs-btn').addEventListener('click', async () => {
+  const btn = $('#thumbs-btn');
+  btn.disabled = true;
+  setMsg($('#thumbs-msg'), '썸네일을 분석하는 중이에요. 처음엔 1~2분 걸릴 수 있어요...');
+  try {
+    const r = await api('POST', `/api/analyses/${currentAnalysisId}/thumbnails`);
+    if (r.status === 'SKIPPED_NO_API_KEY') {
+      setMsg($('#thumbs-msg'), '썸네일 분석에는 Claude API 키(ANTHROPIC_API_KEY)가 필요해요.', true);
+      return;
+    }
+    const cost = Number(r.costUsd || 0).toFixed(4);
+    setMsg($('#thumbs-msg'), `새로 ${r.tagged}개, 같은 이미지 재사용 ${r.reused}개, 이미 분석 ${r.alreadyTagged}개`
+      + (r.expired ? `, 주소 만료 ${r.expired}개(다시 분석하면 새 주소로 받아요)` : '')
+      + (r.failed ? `, 실패 ${r.failed}개` : '') + ` · 비용 $${cost}`);
+    await loadThumbnails(currentAnalysisId);
+  } catch (e) {
+    setMsg($('#thumbs-msg'), e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // 추천 효과 (#14): 채택한 문구로 올린 게시물을 찾아 내 중앙값과 비교
 const STATUS_LABELS = { AUTO: '자동 연결', CONFIRMED: '내가 확인', ASK: '확인 필요', NOT_FOUND: '아직 안 올림' };

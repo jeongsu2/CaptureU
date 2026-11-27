@@ -109,7 +109,16 @@ curl -X POST http://localhost:8080/api/analyses/{id}/recommendations -H 'Content
 curl -X POST http://localhost:8080/api/recommendations/{추천 id}/adoptions -H 'Content-Type: application/json' -d '{"hookIndex":0}'
 ```
 
-7. 올린 뒤 다시 분석하면 추천 효과를 본다
+7. (선택) 썸네일 특징을 분석한다 — `ANTHROPIC_API_KEY` 필요
+
+```bash
+curl -X POST http://localhost:8080/api/analyses/{id}/thumbnails   # 분석 (계정마다 잘된 릴스·나머지 최대 15개씩)
+curl http://localhost:8080/api/analyses/{id}/thumbnails            # 특징별 비율 비교
+```
+
+썸네일을 받아 얼굴 클로즈업, 화면 속 글자 크기, 색감, 구도를 Claude 비전으로 뽑는다. 같은 이미지(SHA-256)는 다시 분석하지 않고, 호출마다 토큰과 비용을 저장한다. 잘된 썸네일에서 뚜렷하게 많은 특징은 추천 썸네일 구성안의 근거로 쓴다. 인스타그램 CDN의 https 주소만 받는다.
+
+8. 올린 뒤 다시 분석하면 추천 효과를 본다
 
 ```bash
 curl http://localhost:8080/api/analyses/{id}/effects

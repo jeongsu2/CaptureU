@@ -121,6 +121,7 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .worse { color: var(--accent); font-weight: 600; }
 .actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .actions button { padding: 6px 10px; font-size: 13px; }
+.thumbs-box { margin-top: 14px; }
 .notes { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 
 /* 좁은 화면: 첫 줄 문구를 한 줄 전체로 쓰고 유형·버튼은 아래 줄로 */

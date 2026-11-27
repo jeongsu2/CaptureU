@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 
 import com.captureu.analysis.ReportService;
 import com.captureu.profile.ProfileService;
+import com.captureu.thumbnail.ThumbnailService;
+import com.captureu.thumbnail.ThumbnailService.ThumbnailSignal;
 import com.anthropic.errors.AnthropicServiceException;
 import com.captureu.recommendation.ClaudeHookWriter.LlmDraft;
 import com.captureu.recommendation.ClaudeHookWriter.LlmRefusedException;
@@ -36,17 +38,19 @@ public class RecommendationService {
 	private final RecommendationRepository repository;
 	private final RecommendationAdoptionRepository adoptionRepository;
 	private final ProfileService profileService;
+	private final ThumbnailService thumbnailService;
 	private final JsonMapper jsonMapper;
 	private final Clock clock;
 
 	RecommendationService(ReportService reportService, ClaudeHookWriter claude, RecommendationRepository repository,
-			RecommendationAdoptionRepository adoptionRepository, ProfileService profileService, JsonMapper jsonMapper,
-			Clock clock) {
+			RecommendationAdoptionRepository adoptionRepository, ProfileService profileService,
+			ThumbnailService thumbnailService, JsonMapper jsonMapper, Clock clock) {
 		this.reportService = reportService;
 		this.claude = claude;
 		this.repository = repository;
 		this.adoptionRepository = adoptionRepository;
 		this.profileService = profileService;
+		this.thumbnailService = thumbnailService;
 		this.jsonMapper = jsonMapper;
 		this.clock = clock;
 	}
@@ -58,6 +62,7 @@ public class RecommendationService {
 			throw new InvalidTopicException();
 		}
 		PatternSummary summary = PatternAnalyzer.analyze(reportService.build(analysisId));
+		List<ThumbnailSignal> thumbnails = thumbnailSignals(analysisId);
 
 		long start = System.nanoTime();
 		Generator generator = Generator.TEMPLATE;
@@ -71,7 +76,7 @@ public class RecommendationService {
 
 		if (claude.enabled()) {
 			try {
-				LlmDraft llm = claude.write(cleanTopic, summary, profileService.current().orElse(null));
+				LlmDraft llm = claude.write(cleanTopic, summary, profileService.current().orElse(null), thumbnails);
 				draft = llm.draft();
 				generator = Generator.LLM;
 				model = llm.model();
@@ -95,16 +100,27 @@ public class RecommendationService {
 			fallbackReason = NO_API_KEY;
 		}
 		if (draft == null) {
-			draft = TemplateHookWriter.write(cleanTopic, summary);
+			draft = TemplateHookWriter.write(cleanTopic, summary, thumbnails);
 		}
 		long latencyMs = (System.nanoTime() - start) / 1_000_000;
 
 		RecommendationResult result = new RecommendationResult(draft.hooks(), draft.thumbnail(), summary.patterns(),
-				summary.fewReferences(), summary.notes());
+				summary.fewReferences(), summary.notes(), thumbnails);
 		Recommendation saved = repository.save(Recommendation.of(analysisId, cleanTopic, generator, model,
 				promptVersion, inputTokens, outputTokens, cost, latencyMs, fallbackReason,
 				jsonMapper.writeValueAsString(result), Instant.now(clock)));
 		return RecommendationResponse.of(saved, result, List.of());
+	}
+
+	/** 썸네일 분석(#11)을 해 두었으면 그 근거를 쓴다. 없거나 실패하면 빈 목록 (추천은 그대로 나온다). */
+	private List<ThumbnailSignal> thumbnailSignals(Long analysisId) {
+		try {
+			return thumbnailService.signals(analysisId);
+		}
+		catch (RuntimeException e) {
+			log.warn("썸네일 근거를 읽지 못해 없이 추천합니다. analysisId={}, error={}", analysisId, e.getClass().getSimpleName());
+			return List.of();
+		}
 	}
 
 	static String failureCode(RuntimeException e) {
@@ -156,7 +172,7 @@ public class RecommendationService {
 	 */
 	public record RecommendationResult(List<RecommendationDraft.HookCandidate> hooks,
 			RecommendationDraft.ThumbnailPlan thumbnail, List<HookPattern> patterns, boolean fewReferences,
-			List<String> notes) {
+			List<String> notes, List<ThumbnailSignal> thumbnailSignals) {
 	}
 
 	/**
