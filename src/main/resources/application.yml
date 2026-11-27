@@ -6,6 +6,9 @@ spring:
   config:
     # 로컬 비밀값(.env, 커밋 안 됨)을 읽는다. 없으면 건너뛴다. 형식은 .env.example 참고
     import: optional:file:.env[.properties]
+  lifecycle:
+    # 종료할 때 진행 중인 분석(수십 초 걸림)이 끝날 때까지 기다린다
+    timeout-per-shutdown-phase: 60s
   jpa:
     open-in-view: false
     hibernate:

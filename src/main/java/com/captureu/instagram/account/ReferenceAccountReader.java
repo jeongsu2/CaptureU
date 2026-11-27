@@ -101,7 +101,7 @@ public class ReferenceAccountReader {
 
 	private JsonNode discovery(String ownerIgUserId, String username, String innerFields, ReadContext ctx) {
 		String safe = normalizeUsername(username);
-		ctx.countCall();
+		ctx.beforeCall();
 		return client
 			.get(ownerIgUserId, Map.of("fields", "business_discovery.username(%s){%s}".formatted(safe, innerFields)))
 			.path("business_discovery");
