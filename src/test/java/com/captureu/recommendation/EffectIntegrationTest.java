@@ -65,6 +65,7 @@ class EffectIntegrationTest {
 	@BeforeEach
 	void setUp() {
 		// 다른 테스트의 채택이 섞이면 연결 대상이 달라진다
+		jdbc.update("delete from adoption_rejection");
 		jdbc.update("delete from recommendation_adoption");
 		given(reader.readAccount(eq("100"), any())).willReturn(new AccountInfo("100", "tester", 100, 1));
 		given(reader.readInsights(any(), any()))
@@ -92,11 +93,11 @@ class EffectIntegrationTest {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.adoptions[0].status").value("AUTO"))
 			.andExpect(jsonPath("$.adoptions[0].post.mediaId").value("eff-a"))
-			.andExpect(jsonPath("$.adoptions[0].post.mature").value(false))
+			.andExpect(jsonPath("$.adoptions[0].post.excludedReason").value("YOUNG"))
 			.andExpect(jsonPath("$.adoptions[1].status").value("ASK"))
 			.andExpect(jsonPath("$.adoptions[1].candidate.mediaId").value("eff-b"))
 			.andExpect(jsonPath("$.summary.matchedCount").value(1))
-			.andExpect(jsonPath("$.summary.matureCount").value(0))
+			.andExpect(jsonPath("$.summary.comparedCount").value(0))
 			.andExpect(jsonPath("$.summary.headline").doesNotExist());
 
 		// "이 게시물에 썼어요"
@@ -112,6 +113,23 @@ class EffectIntegrationTest {
 			.andExpect(jsonPath("$.adoptions[0].status").value("NOT_FOUND"))
 			.andExpect(jsonPath("$.adoptions[1].status").value("CONFIRMED"))
 			.andExpect(jsonPath("$.adoptions[1].post.mediaId").value("eff-b"));
+
+		// 새 게시물에 다시 자동 연결됐다가 그것도 떼면, 처음 뗀 게시물로 돌아가지 않는다
+		Long third = analyze(old,
+				reel("eff-a", now.minus(30, ChronoUnit.MINUTES), "겨울 출근룩, 아직도 이렇게 하세요? 🧣\n본문"),
+				reel("eff-b", now.minus(20, ChronoUnit.MINUTES), "출근룩 3가지 정리"),
+				reel("eff-c", now.minus(10, ChronoUnit.MINUTES), "겨울 출근룩 아직도 이렇게 하세요!!"));
+		mockMvc.perform(get("/api/analyses/" + third + "/effects"))
+			.andExpect(jsonPath("$.adoptions[0].status").value("AUTO"))
+			.andExpect(jsonPath("$.adoptions[0].post.mediaId").value("eff-c"));
+		mockMvc.perform(post("/api/adoptions/" + usedAsIs + "/match").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"analysisId\":%d,\"mediaId\":\"eff-c\",\"used\":false}".formatted(third)))
+			.andExpect(status().isNoContent());
+		mockMvc.perform(get("/api/analyses/" + third + "/effects"))
+			.andExpect(jsonPath("$.adoptions[0].status").value("NOT_FOUND"));
+		// 조회는 저장하지 않는다
+		assertThat(jdbc.queryForObject("select count(*) from recommendation_adoption where match_status is not null",
+				Integer.class)).isEqualTo(1);
 	}
 
 	@Test
@@ -126,7 +144,7 @@ class EffectIntegrationTest {
 
 		mockMvc.perform(post("/api/adoptions/" + b + "/match").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"analysisId\":%d,\"mediaId\":\"eff-old\",\"used\":true}".formatted(first)))
-			.andExpect(status().isBadRequest())
+			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.detail").value("이 게시물은 이미 다른 채택 문구에 연결돼 있어요"));
 		mockMvc.perform(post("/api/adoptions/" + b + "/match").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"analysisId\":%d,\"mediaId\":\"someone-else\",\"used\":true}".formatted(first)))

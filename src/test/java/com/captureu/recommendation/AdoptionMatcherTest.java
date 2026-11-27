@@ -32,4 +32,9 @@ class AdoptionMatcherTest {
 		assertThat(AdoptionMatcher.similarity("겨울 출근룩", null)).isZero();
 		assertThat(AdoptionMatcher.similarity("겨울 출근룩", "🧣🧣")).isZero();
 	}
+
+	@Test
+	void 긴_문구에_짧은_조각이_들어_있는_것만으로는_같다고_보지_않는다() {
+		assertThat(AdoptionMatcher.similarity("직장인이라면 꼭 알아야 할 3가지", "직장인이라면")).isLessThan(AdoptionMatcher.AUTO);
+	}
 }

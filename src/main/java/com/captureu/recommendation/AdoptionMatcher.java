@@ -16,6 +16,8 @@ final class AdoptionMatcher {
 	static final double AUTO = 0.6;
 	/** 이 이상이면 후보로 보여 주고 사용자에게 묻는다. */
 	static final double ASK = 0.35;
+	/** 포함 관계로 같다고 보려면 짧은 쪽이 긴 쪽의 이 비율 이상이어야 한다. */
+	static final double MIN_CONTAINED_RATIO = 0.6;
 
 	private AdoptionMatcher() {
 	}
@@ -26,8 +28,10 @@ final class AdoptionMatcher {
 		if (a.isEmpty() || b.isEmpty()) {
 			return 0;
 		}
-		// 추천 문구를 그대로 넣고 앞뒤에 덧붙인 경우
-		if (b.contains(a) || a.contains(b) && b.codePointCount(0, b.length()) >= 4) {
+		// 추천 문구를 그대로 넣고 앞뒤에 조금 덧붙인 경우. 짧은 조각("직장인이라면")이 긴 문구에 들어 있는 것만으로는 같다고 보지 않는다
+		int la = a.codePointCount(0, a.length());
+		int lb = b.codePointCount(0, b.length());
+		if ((b.contains(a) || a.contains(b)) && Math.min(la, lb) >= MIN_CONTAINED_RATIO * Math.max(la, lb)) {
 			return 1;
 		}
 		Map<String, Integer> left = bigrams(a);

@@ -48,12 +48,8 @@ public class RecommendationAdoption {
 	private Instant adoptedAt;
 
 	public enum MatchStatus {
-		/** 캡션이 충분히 비슷해 자동으로 연결 */
-		AUTO,
-		/** 사용자가 "이 게시물에 썼어요"로 연결 */
-		CONFIRMED,
-		/** 사용자가 "아니에요"로 뗌. matchedMediaId는 뗀 게시물이고, 그 게시물에는 다시 자동 연결하지 않는다 */
-		REJECTED
+		/** 사용자가 "이 게시물에 썼어요"로 연결. 자동 연결은 저장하지 않고 조회할 때마다 계산한다 */
+		CONFIRMED
 	}
 
 	@Enumerated(EnumType.STRING)
@@ -68,16 +64,26 @@ public class RecommendationAdoption {
 
 	private Instant matchedAt;
 
-	/** 이 채택을 쓴 게시물이 정해졌는지 (자동 또는 사용자 확인). */
-	public boolean isMatched() {
-		return matchStatus == MatchStatus.AUTO || matchStatus == MatchStatus.CONFIRMED;
+	@jakarta.persistence.Version
+	private long version;
+
+	/** 사용자가 이 채택을 쓴 게시물을 확인했는지. */
+	public boolean isConfirmed() {
+		return matchStatus == MatchStatus.CONFIRMED;
 	}
 
-	void match(MatchStatus status, String mediaId, Double score, Instant now) {
-		this.matchStatus = status;
+	void confirm(String mediaId, Double score, Instant now) {
+		this.matchStatus = MatchStatus.CONFIRMED;
 		this.matchedMediaId = mediaId;
 		this.matchScore = score;
 		this.matchedAt = now;
+	}
+
+	void clearConfirmation() {
+		this.matchStatus = null;
+		this.matchedMediaId = null;
+		this.matchScore = null;
+		this.matchedAt = null;
 	}
 
 	static RecommendationAdoption of(Recommendation r, int hookIndex, RecommendationDraft.HookCandidate hook,

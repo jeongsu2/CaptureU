@@ -20,6 +20,7 @@ function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
+  node.append(error);
   return node;
 }
 
@@ -197,7 +198,8 @@ async function loadEffects(analysisId) {
   try {
     report = await api('GET', `/api/analyses/${analysisId}/effects`);
   } catch (e) {
-    section.classList.add('hidden');
+    section.classList.remove('hidden');
+    $('#effect').replaceChildren(el('p', 'msg error', `추천 효과를 불러오지 못했어요: ${e.message}`));
     return;
   }
   if (!report.adoptions.length) { section.classList.add('hidden'); return; }
@@ -225,24 +227,30 @@ function renderAdoption(a, analysisId) {
   const head = el('p');
   head.append(el('span', 'quote', `“${a.hookText}”`), el('span', 'state', STATUS_LABELS[a.status] || a.status));
   node.append(head);
+  const error = el('p', 'msg error');
   const decide = async (mediaId, used) => {
+    error.textContent = '';
     try {
       await api('POST', `/api/adoptions/${a.adoptionId}/match`, { analysisId: Number(analysisId), mediaId, used });
-      await loadEffects(analysisId);
     } catch (e) {
-      node.append(el('p', 'msg error', e.message));
+      error.textContent = e.message;
+      return;
     }
+    await loadEffects(analysisId);
   };
   if (a.post) {
     const p = a.post;
     const row = el('div', 'matched');
     const info = el('div', 'info');
-    if (!p.inAnalysis) {
+    if (p.excludedReason === 'NO_METRICS') {
       info.append(el('p', 'hint', '이번 분석에서 이 게시물의 지표를 받지 못했어요.'));
     } else {
       info.append(el('p', null, p.captionFirstLine || ''));
-      const age = p.mature ? '게시 7일 지남' : `게시 ${p.ageHours}시간 (7일 전이라 참고용)`;
-      info.append(el('p', 'hint', age));
+      const reasons = {
+        YOUNG: `게시 ${p.ageHours}시간 (7일 전이라 참고용)`,
+        NOT_REELS: '릴스가 아니라 비교에서 뺐어요',
+      };
+      info.append(el('p', 'hint', reasons[p.excludedReason] || '게시 7일 지남 · 평균에 넣었어요'));
       const skip = el('p', null, `스킵률 ${p.skipRate ?? '-'}% · 내 중앙값 대비 `);
       skip.append(el('span', p.skipRateDiff == null ? null : p.skipRateDiff <= 0 ? 'better' : 'worse', signed(p.skipRateDiff, '%p')));
       info.append(skip);

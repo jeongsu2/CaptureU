@@ -45,9 +45,20 @@ class EffectController {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
 	}
 
-	@ExceptionHandler(IllegalArgumentException.class)
-	ProblemDetail invalid(IllegalArgumentException e) {
+	@ExceptionHandler(InvalidMatchException.class)
+	ProblemDetail invalid(InvalidMatchException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
+	@ExceptionHandler(AdoptionConflictException.class)
+	ProblemDetail conflict(AdoptionConflictException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+	}
+
+	/** 같은 채택을 동시에 바꾼 경우 (version). */
+	@ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)
+	ProblemDetail concurrent(RuntimeException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "다른 곳에서 먼저 바꿨어요. 새로고침 후 다시 시도해 주세요");
 	}
 
 	record MatchRequest(@NotNull(message = "분석 ID가 필요해요") Long analysisId,
