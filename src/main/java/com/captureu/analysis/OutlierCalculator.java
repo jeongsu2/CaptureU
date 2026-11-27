@@ -20,34 +20,39 @@ public final class OutlierCalculator {
 	/** 판정할 게시물이 이보다 적으면 중앙값을 믿기 어려워 '참고용'으로 표시한다. */
 	public static final int MIN_SAMPLE = 5;
 
+	/** 배수 높은 순, 같으면 조회수 높은 순, 그래도 같으면 ID 순 (요청할 때마다 순서가 같도록). */
+	private static final Comparator<ScoredPost> ORDER = Comparator
+		.comparing(ScoredPost::multiple, Comparator.nullsLast(Comparator.reverseOrder()))
+		.thenComparing(ScoredPost::views, Comparator.reverseOrder())
+		.thenComparing(ScoredPost::mediaId);
+
 	private OutlierCalculator() {
 	}
 
 	public static AccountOutliers calculate(List<PostMetric> posts) {
 		List<PostMetric> reels = posts.stream().filter(PostMetric::isReels).toList();
-		List<PostMetric> mature = reels.stream()
-			.filter(p -> p.ageHours() >= MATURE_AGE_HOURS && p.views() != null)
-			.toList();
-		List<String> young = reels.stream()
-			.filter(p -> p.ageHours() < MATURE_AGE_HOURS)
-			.map(PostMetric::mediaId)
-			.toList();
+		List<PostMetric> young = reels.stream().filter(p -> p.ageHours() < MATURE_AGE_HOURS).toList();
+		List<PostMetric> mature = reels.stream().filter(p -> p.ageHours() >= MATURE_AGE_HOURS).toList();
+		List<PostMetric> judged = mature.stream().filter(p -> p.views() != null).toList();
+		int excluded = mature.size() - judged.size();
+		List<String> youngIds = young.stream().map(PostMetric::mediaId).toList();
 
-		if (mature.isEmpty()) {
-			return new AccountOutliers(0, null, null, List.of(), young, true);
+		if (judged.isEmpty()) {
+			return new AccountOutliers(0, excluded, null, null, List.of(), youngIds, true);
 		}
-		double median = median(mature.stream().map(p -> p.views().doubleValue()).toList());
-		double mean = mature.stream().mapToInt(PostMetric::views).average().orElse(0);
+		double median = median(judged.stream().map(p -> p.views().doubleValue()).toList());
+		double mean = judged.stream().mapToInt(PostMetric::views).average().orElse(0);
 
 		List<ScoredPost> scored = new ArrayList<>();
-		for (PostMetric p : mature) {
-			double multiple = median == 0 ? 0 : p.views() / median;
-			Double commentRate = p.comments() == null || p.views() == 0 ? null : (double) p.comments() / p.views();
-			scored.add(new ScoredPost(p.mediaId(), p.views(), round2(multiple), commentRate,
-					multiple >= OUTLIER_MULTIPLE));
+		for (PostMetric p : judged) {
+			// 중앙값이 0이면 배수를 정할 수 없다. 조회수가 있는 게시물은 모두 평소보다 잘된 것으로 본다
+			Double multiple = median == 0 ? null : round2(p.views() / median);
+			boolean outlier = multiple == null ? p.views() > 0 : multiple >= OUTLIER_MULTIPLE;
+			scored.add(new ScoredPost(p.mediaId(), p.views(), multiple, percent(p.comments(), p.views()), outlier));
 		}
-		scored.sort(Comparator.comparingDouble(ScoredPost::multiple).reversed());
-		return new AccountOutliers(mature.size(), median, mean, scored, young, mature.size() < MIN_SAMPLE);
+		scored.sort(ORDER);
+		return new AccountOutliers(judged.size(), excluded, round2(median), round2(mean), scored, youngIds,
+				judged.size() < MIN_SAMPLE);
 	}
 
 	static double median(List<Double> values) {
@@ -59,7 +64,15 @@ public final class OutlierCalculator {
 		return n % 2 == 1 ? sorted.get(n / 2) : (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
 	}
 
-	private static double round2(double v) {
+	/** part / whole을 %로, 소수 둘째 자리까지. 나눌 수 없으면 null. */
+	static Double percent(Integer part, Integer whole) {
+		if (part == null || whole == null || whole == 0) {
+			return null;
+		}
+		return round2(100.0 * part / whole);
+	}
+
+	static double round2(double v) {
 		return Math.round(v * 100) / 100.0;
 	}
 
@@ -72,22 +85,23 @@ public final class OutlierCalculator {
 	}
 
 	/**
-	 * @param multiple    중앙값 대비 배수 (소수 둘째 자리)
-	 * @param commentRate 조회수 대비 댓글 비율. 댓글 이벤트 게시물은 높게 나오므로 해석에 주의
+	 * @param multiple    중앙값 대비 배수 (소수 둘째 자리). 중앙값이 0이면 null. 아웃라이어 판정도 이 반올림 값으로 한다
+	 * @param commentRate 조회수 대비 댓글 비율(%). 댓글 이벤트 게시물은 높게 나오므로 해석에 주의
 	 */
-	public record ScoredPost(String mediaId, int views, double multiple, Double commentRate, boolean outlier) {
+	public record ScoredPost(String mediaId, int views, Double multiple, Double commentRate, boolean outlier) {
 	}
 
 	/**
 	 * @param judgedCount   판정한 릴스 수 (게시 7일 이상, 조회수 있음)
+	 * @param excludedCount 게시 7일 이상인데 조회수가 없어 판정에서 뺀 릴스 수 (인사이트 실패 등)
 	 * @param medianViews   판정한 릴스의 조회수 중앙값
 	 * @param meanViews     같은 릴스의 평균 (중앙값과 비교용)
 	 * @param posts         배수 높은 순. outlier=true가 아웃라이어
 	 * @param youngMediaIds 게시 7일 미만이라 판정하지 않은 릴스
 	 * @param lowSample     판정한 릴스가 너무 적어 참고용
 	 */
-	public record AccountOutliers(int judgedCount, Double medianViews, Double meanViews, List<ScoredPost> posts,
-			List<String> youngMediaIds, boolean lowSample) {
+	public record AccountOutliers(int judgedCount, int excludedCount, Double medianViews, Double meanViews,
+			List<ScoredPost> posts, List<String> youngMediaIds, boolean lowSample) {
 
 		public List<ScoredPost> outliers() {
 			return posts.stream().filter(ScoredPost::outlier).toList();

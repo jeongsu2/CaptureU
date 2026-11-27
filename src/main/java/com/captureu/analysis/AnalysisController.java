@@ -52,9 +52,14 @@ class AnalysisController {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
 	}
 
+	/** 수집 중이면 409(잠시 후 다시), 실패한 분석이면 422(다시 봐도 결과 없음). */
 	@ExceptionHandler(AnalysisNotReadyException.class)
 	ProblemDetail notReady(AnalysisNotReadyException e) {
-		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+		HttpStatus status = e.getStatus() == AnalysisStatus.FAILED ? HttpStatus.UNPROCESSABLE_CONTENT
+				: HttpStatus.CONFLICT;
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
+		problem.setProperty("analysisStatus", e.getStatus().name());
+		return problem;
 	}
 
 	@ExceptionHandler(AccountNotConnectedException.class)

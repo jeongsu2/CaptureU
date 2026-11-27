@@ -76,6 +76,9 @@ public class OutlierService {
 	public record AnalysisOutliers(Long analysisId, AccountResult own, List<AccountResult> references) {
 	}
 
-	public record AccountResult(String igUserId, String username, boolean mine, AccountOutliers outliers) {
+	/**
+	 * @param accountKey 계정 구분값. 보통 인스타 계정 ID이고, 참고 계정 ID를 받지 못했으면 "@아이디"
+	 */
+	public record AccountResult(String accountKey, String username, boolean mine, AccountOutliers outliers) {
 	}
 }

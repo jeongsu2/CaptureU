@@ -70,6 +70,8 @@ class AnalysisWriter {
 		}
 
 		List<AnalysisReference> referenceResults = new ArrayList<>();
+		// 아이디를 바꾼 계정은 다른 아이디로 같은 계정이 될 수 있다. 내 계정이나 이미 넣은 계정과 같으면 건너뛴다
+		Set<String> accounts = new HashSet<>(Set.of(owner));
 		for (CollectedReference ref : references) {
 			if (!ref.succeeded()) {
 				referenceResults.add(AnalysisReference.failed(analysisId, ref.username(), ref.failureType(),
@@ -78,6 +80,11 @@ class AnalysisWriter {
 			}
 			var profile = ref.data().profile();
 			String account = referenceAccountId(profile.igId(), ref.username());
+			if (!accounts.add(account)) {
+				referenceResults.add(AnalysisReference.failed(analysisId, ref.username(), "DUPLICATE_ACCOUNT",
+						"내 계정 또는 다른 참고 계정과 같은 계정", ref.apiCallCount(), ref.durationMs()));
+				continue;
+			}
 			Set<String> refSeen = new HashSet<>();
 			for (ReferenceMedia rm : ref.data().media()) {
 				if (refSeen.add(rm.item().id())) {

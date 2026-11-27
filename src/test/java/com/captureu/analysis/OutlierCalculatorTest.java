@@ -66,8 +66,49 @@ class OutlierCalculatorTest {
 		AccountOutliers result = OutlierCalculator.calculate(posts);
 
 		assertThat(result.judgedCount()).isEqualTo(2);
+		assertThat(result.excludedCount()).isEqualTo(1);
 		assertThat(result.medianViews()).isEqualTo(2000);
 		assertThat(result.lowSample()).isTrue();
+	}
+
+	@Test
+	void 중앙값이_0이면_배수_없이_조회수가_있는_게시물을_아웃라이어로_본다() {
+		List<PostMetric> posts = List.of(reel("a", 0), reel("b", 0), reel("c", 0), reel("d", 5000), reel("e", 12000));
+
+		AccountOutliers result = OutlierCalculator.calculate(posts);
+
+		assertThat(result.medianViews()).isEqualTo(0);
+		assertThat(result.outliers()).extracting(ScoredPost::mediaId).containsExactly("e", "d");
+		assertThat(result.posts()).allSatisfy(p -> assertThat(p.multiple()).isNull());
+	}
+
+	@Test
+	void 반올림한_배수로_판정해서_화면의_숫자와_판정이_같다() {
+		// 중앙값 1000에서 1996은 1.996배 → 화면에 2.0으로 보이므로 아웃라이어여야 한다
+		List<PostMetric> posts = List.of(reel("a", 900), reel("b", 950), reel("c", 1000), reel("d", 1050),
+				reel("e", 1996));
+
+		AccountOutliers result = OutlierCalculator.calculate(posts);
+
+		assertThat(result.outliers()).singleElement().satisfies(p -> {
+			assertThat(p.mediaId()).isEqualTo("e");
+			assertThat(p.multiple()).isEqualTo(2.0);
+		});
+	}
+
+	@Test
+	void 배수가_같으면_조회수_높은_순_그다음_ID_순으로_정렬한다() {
+		List<PostMetric> posts = List.of(reel("b", 1000), reel("a", 1000), reel("c", 1000));
+
+		assertThat(OutlierCalculator.calculate(posts).posts()).extracting(ScoredPost::mediaId)
+			.containsExactly("a", "b", "c");
+	}
+
+	@Test
+	void 평균도_소수_둘째_자리로_반올림한다() {
+		AccountOutliers result = OutlierCalculator.calculate(List.of(reel("a", 1000), reel("b", 1000), reel("c", 1100)));
+
+		assertThat(result.meanViews()).isEqualTo(1033.33);
 	}
 
 	@Test
@@ -81,10 +122,10 @@ class OutlierCalculatorTest {
 	}
 
 	@Test
-	void 댓글_반응률은_조회수_대비_댓글_수다() {
+	void 댓글_반응률은_조회수_대비_댓글_수의_퍼센트다() {
 		AccountOutliers result = OutlierCalculator.calculate(List.of(new PostMetric("a", "REELS", MATURE, 2000, 50)));
 
-		assertThat(result.posts().get(0).commentRate()).isEqualTo(0.025);
+		assertThat(result.posts().get(0).commentRate()).isEqualTo(2.5);
 	}
 
 	private static PostMetric reel(String id, int views) {

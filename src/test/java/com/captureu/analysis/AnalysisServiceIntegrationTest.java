@@ -211,12 +211,33 @@ class AnalysisServiceIntegrationTest {
 	}
 
 	@Test
-	void 실패한_분석의_아웃라이어는_409() throws Exception {
+	void 실패한_분석은_422_수집_중인_분석은_409_없는_분석은_404() throws Exception {
 		given(reader.readAllMedia(eq("100"), any()))
 			.willThrow(new GraphApiException(GraphApiErrorType.TOKEN_INVALID, 400, 190, 464, "x"));
-		Long id = analysisService.request("100").id();
+		Long failed = analysisService.request("100").id();
+		Long collecting = writer.start("100", Instant.now()).getId();
 
-		mockMvc.perform(get("/api/analyses/" + id + "/outliers")).andExpect(status().isConflict());
+		mockMvc.perform(get("/api/analyses/" + failed + "/outliers"))
+			.andExpect(status().isUnprocessableContent())
+			.andExpect(jsonPath("$.analysisStatus").value("FAILED"));
+		mockMvc.perform(get("/api/analyses/" + collecting + "/outliers"))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.analysisStatus").value("COLLECTING"));
+		mockMvc.perform(get("/api/analyses/999999/outliers")).andExpect(status().isNotFound());
+		writer.fail(collecting, "TEST", "정리", 0, Instant.now());
+	}
+
+	@Test
+	void 참고_계정이_내_계정과_같은_계정이면_건너뛴다() {
+		referenceRepository.save(new ReferenceAccount("100", "renamed.me", "100", 1, Instant.now()));
+		given(referenceReader.read(eq("100"), eq("renamed.me"), anyInt(), any()))
+			.willReturn(new ReferenceAccountData(new ReferenceProfile("100", "renamed.me", 1, 1), List.of()));
+
+		AnalysisResponse response = analysisService.request("100");
+
+		assertThat(response.status()).isEqualTo(AnalysisStatus.DONE);
+		assertThat(response.references()).singleElement()
+			.satisfies(r -> assertThat(r.failureType()).isEqualTo("DUPLICATE_ACCOUNT"));
 	}
 
 	@Test
