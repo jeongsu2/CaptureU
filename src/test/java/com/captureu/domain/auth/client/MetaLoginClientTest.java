@@ -51,12 +51,42 @@ class MetaLoginClientTest {
 	}
 
 	@Test
+	void 통합_로그인_토큰은_배정된_인스타_계정으로_찾는다() {
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/assigned_instagram_accounts")))
+			.andExpect(queryParam("access_token", "EAAsys"))
+			.andRespond(withSuccess("{\"data\":[{\"id\":\"1785\",\"username\":\"unified.ig\"}]}",
+					MediaType.APPLICATION_JSON));
+
+		var account = client.findInstagramAccount("EAAsys");
+
+		assertThat(account).hasValueSatisfying(a -> {
+			assertThat(a.igUserId()).isEqualTo("1785");
+			assertThat(a.username()).isEqualTo("unified.ig");
+		});
+		server.verify();
+	}
+
+	@Test
+	void 배정된_계정이_없으면_페이지에_연결된_계정을_찾는다() {
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/assigned_instagram_accounts")))
+			.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
+				.body("{\"error\":{\"message\":\"Unsupported get request\",\"code\":100}}"));
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/accounts")))
+			.andRespond(withSuccess("{\"data\":[]}", MediaType.APPLICATION_JSON));
+
+		assertThat(client.findInstagramAccount("EAAuser")).isEmpty();
+		server.verify();
+	}
+
+	@Test
 	void 코드를_토큰으로_바꾸고_인스타_계정을_찾는다() {
 		server.expect(once(), requestTo(Matchers.startsWith(BASE + "oauth/access_token")))
 			.andExpect(queryParam("code", "CODE1"))
 			.andExpect(queryParam("client_secret", "SECRET123"))
 			.andRespond(withSuccess("{\"access_token\":\"EAAuser\",\"token_type\":\"bearer\",\"expires_in\":5183944}",
 					MediaType.APPLICATION_JSON));
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/assigned_instagram_accounts")))
+			.andRespond(withSuccess("{\"data\":[]}", MediaType.APPLICATION_JSON));
 		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/accounts")))
 			.andExpect(queryParam("access_token", "EAAuser"))
 			.andRespond(withSuccess("""
@@ -76,6 +106,9 @@ class MetaLoginClientTest {
 
 	@Test
 	void 실패해도_시크릿과_토큰을_메시지에_남기지_않는다() {
+		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/assigned_instagram_accounts")))
+			.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
+				.body("{\"error\":{\"message\":\"Invalid token EAAleak for app secret SECRET123\",\"code\":190}}"));
 		server.expect(once(), requestTo(Matchers.startsWith(BASE + "me/accounts")))
 			.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
 				.body("{\"error\":{\"message\":\"Invalid token EAAleak for app secret SECRET123\",\"code\":190}}"));

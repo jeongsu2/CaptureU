@@ -93,8 +93,8 @@ com.captureu
 
 로그인하지 않으면 로컬 개발용으로 `.env`의 `IG_USER_ID`·`IG_ACCESS_TOKEN` 계정을 쓴다. 인스타 로그인을 쓰려면 `.env`에 아래 값을 넣는다 (`.env.example` 참고).
 
-1. Meta 앱 대시보드: 비즈니스용 Facebook 로그인 → 구성을 만들고 구성 ID를 `META_LOGIN_CONFIG_ID`에
-2. 같은 화면의 설정 → 유효한 OAuth 리디렉션 URI에 `META_REDIRECT_URI`(예: `http://localhost:8080/api/auth/callback`)를 등록
+1. Meta 앱 대시보드: 비즈니스용 Facebook 로그인 → 구성을 만들고 구성 ID를 `META_LOGIN_CONFIG_ID`에. 토큰 유형은 시스템 사용자 액세스 토큰, 자산은 Instagram 계정, 권한은 `instagram_basic`·`instagram_manage_insights` (페이스북 페이지 없이 로그인하는 Unified Login 방식. 인스타 계정은 `me/assigned_instagram_accounts`로 찾고, 없으면 페이지에 연결된 계정을 찾는다)
+2. 같은 화면의 설정 → 유효한 OAuth 리디렉션 URI에 `META_REDIRECT_URI`(예: `http://localhost:8080/api/auth/callback`)를 등록. Meta가 HTTPS 주소만 받으면 터널(예: `cloudflared tunnel --url http://localhost:8080`)의 HTTPS 주소 + `/api/auth/callback`을 등록하고 같은 값을 `META_REDIRECT_URI`에 넣는다
 3. 앱 ID·시크릿을 `META_APP_ID`·`META_APP_SECRET`에, `openssl rand -base64 32`로 만든 값을 `TOKEN_ENCRYPTION_KEY`에
 
 화면 위쪽의 "인스타로 로그인"을 누르면 Meta 로그인 → 돌아와서 토큰을 AES-GCM으로 암호화해 저장하고 세션에 계정을 넣는다. 분석·추천·썸네일·효과는 로그인한 계정의 것만 볼 수 있고(남의 분석 ID는 404), 추적 스케줄러는 추적을 켠 계정마다 그 계정의 토큰으로 돈다. `.env` 계정 대체는 로컬 개발 프로필에서만 켜지고 기본은 꺼져 있다. HTTPS로 배포하면 `SESSION_COOKIE_SECURE=true`.

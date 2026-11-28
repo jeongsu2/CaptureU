@@ -81,10 +81,34 @@ public class MetaLoginClient {
 	}
 
 	/**
-	 * 토큰에 연결된 인스타 프로페셔널 계정. 문서의 방법(페이스북 페이지 → instagram_business_account)으로 찾는다.
-	 * Unified Login(페이지 없이 인스타로 로그인)에서 같은 방법이 통하는지는 실제 로그인으로 확인해야 한다.
+	 * 토큰에 연결된 인스타 프로페셔널 계정.
+	 * Unified Login 토큰(비즈니스 연동 시스템 사용자)은 페이지 없이 계정이 바로 배정되므로 me/assigned_instagram_accounts로 찾는다.
+	 * 거기서 못 찾으면(페이스북 페이지에 연결한 계정) 페이지 → instagram_business_account로 찾는다.
 	 */
 	public Optional<InstagramAccount> findInstagramAccount(String accessToken) {
+		MetaLoginException assignedError = null;
+		try {
+			JsonNode assigned = get("me/assigned_instagram_accounts", Map.of("fields", "id,username"), accessToken);
+			for (JsonNode ig : assigned.path("data")) {
+				String id = ig.path("id").asString(null);
+				if (id != null) {
+					return Optional.of(new InstagramAccount(id, ig.path("username").asString(null)));
+				}
+			}
+		}
+		catch (MetaLoginException e) {
+			// 시스템 사용자 토큰이 아니면 이 경로가 없을 수 있다. 페이지 방식으로 한 번 더 찾는다
+			assignedError = e;
+		}
+		try {
+			return findThroughPages(accessToken);
+		}
+		catch (MetaLoginException e) {
+			throw assignedError != null ? assignedError : e;
+		}
+	}
+
+	private Optional<InstagramAccount> findThroughPages(String accessToken) {
 		JsonNode pages = get("me/accounts", Map.of("fields", "instagram_business_account{id,username}"), accessToken);
 		for (JsonNode page : pages.path("data")) {
 			JsonNode ig = page.path("instagram_business_account");
