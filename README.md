@@ -38,6 +38,21 @@
 - 지금: Java 21 (가상 스레드), Spring Boot 4.1, Spring Data JPA, MySQL 8.4, Redis 8.4, Flyway, Docker Compose, Testcontainers, GitHub Actions
 - 계획: Kafka, Prometheus, Grafana, k6, LLM API
 
+## 코드 구조
+
+```
+com.captureu
+├── domain/<기능>          analysis, instagram, llm, profile, recommendation, reference, thumbnail
+│   ├── controller         REST API
+│   ├── dto/request·response  요청·응답 본문
+│   ├── entity             JPA 엔티티
+│   ├── repository         Spring Data JPA
+│   ├── service            비즈니스 로직
+│   ├── client             외부 API 호출 (Instagram Graph API, Claude)
+│   ├── exception · config · util
+└── global                 config, error(공통 예외 처리), util
+```
+
 ## 측정한 개선
 
 실제 계정(게시물 193개)과 참고 계정 3개로 분석 요청 한 건을 쟀다. 개선은 항상 먼저 재고 나서 했다.
