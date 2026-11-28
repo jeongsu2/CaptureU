@@ -117,12 +117,13 @@ public class TrackingService {
 	public List<CollectResult> collectAll() {
 		List<CollectResult> results = new java.util.ArrayList<>();
 		for (Tracking t : trackingRepository.findByEnabledTrue()) {
-			Optional<CurrentAccount> account = accounts.forOwner(t.getIgUserId());
-			if (account.isEmpty()) {
-				log.warn("추적 중인데 토큰이 없어 건너뜀 igUserId={}", t.getIgUserId());
-				continue;
-			}
 			try {
+				// 토큰 복호화 실패도 이 계정만 건너뛴다
+				Optional<CurrentAccount> account = accounts.forOwner(t.getIgUserId());
+				if (account.isEmpty()) {
+					log.warn("추적 중인데 토큰이 없어 건너뜀 igUserId={}", t.getIgUserId());
+					continue;
+				}
 				results.add(collectDue(account.get()));
 			}
 			catch (RuntimeException e) {

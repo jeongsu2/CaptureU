@@ -97,7 +97,7 @@ com.captureu
 2. 같은 화면의 설정 → 유효한 OAuth 리디렉션 URI에 `META_REDIRECT_URI`(예: `http://localhost:8080/api/auth/callback`)를 등록
 3. 앱 ID·시크릿을 `META_APP_ID`·`META_APP_SECRET`에, `openssl rand -base64 32`로 만든 값을 `TOKEN_ENCRYPTION_KEY`에
 
-화면 위쪽의 "인스타로 로그인"을 누르면 Meta 로그인 → 돌아와서 토큰을 AES-GCM으로 암호화해 저장하고 세션에 계정을 넣는다. 분석·추천·썸네일·효과는 로그인한 계정의 것만 볼 수 있고(남의 분석 ID는 404), 추적 스케줄러는 추적을 켠 계정마다 그 계정의 토큰으로 돈다. 배포에서는 `AUTH_ENV_FALLBACK=false`로 `.env` 계정 대체를 끈다.
+화면 위쪽의 "인스타로 로그인"을 누르면 Meta 로그인 → 돌아와서 토큰을 AES-GCM으로 암호화해 저장하고 세션에 계정을 넣는다. 분석·추천·썸네일·효과는 로그인한 계정의 것만 볼 수 있고(남의 분석 ID는 404), 추적 스케줄러는 추적을 켠 계정마다 그 계정의 토큰으로 돈다. `.env` 계정 대체는 로컬 개발 프로필에서만 켜지고 기본은 꺼져 있다. HTTPS로 배포하면 `SESSION_COOKIE_SECURE=true`.
 
 ### 화면으로 써 보기
 

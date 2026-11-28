@@ -33,6 +33,10 @@ public class CurrentAccountResolver {
 		this.userRepository = userRepository;
 		this.auth = auth;
 		this.graph = graph;
+		if (auth.loginAvailable()) {
+			// 키 형식이 틀리면 로그인 도중이 아니라 서버 시작 때 바로 알린다
+			this.cipher = new TokenCipher(auth.tokenEncryptionKey());
+		}
 	}
 
 	/** 쓸 수 있는 계정이 없으면 {@link AccountNotConnectedException}. */

@@ -66,6 +66,20 @@ function showLoginResult() {
   history.replaceState(null, '', location.pathname);
 }
 
+function logoutButton() {
+  const out = el('button', 'secondary', '로그아웃');
+  out.addEventListener('click', async () => {
+    out.disabled = true;
+    try {
+      await api('POST', '/api/auth/logout');
+    } finally {
+      forgetLastViews();
+      location.href = '/';
+    }
+  });
+  return out;
+}
+
 async function loadMe() {
   const box = $('#auth');
   box.replaceChildren();
@@ -73,21 +87,14 @@ async function loadMe() {
   try {
     me = await api('GET', '/api/auth/me');
   } catch (e) {
+    // 저장된 토큰을 읽지 못하는 등으로 계정 확인이 실패해도 빠져나올 수 있게 로그아웃은 보여 준다
+    setMsg($('#auth-msg'), '계정을 확인하지 못했어요. 로그아웃 후 다시 로그인해 주세요.', true);
+    box.append(logoutButton());
     return;
   }
   if (me.source === 'LOGIN') {
     box.append(el('span', null, `@${me.username || me.igUserId}로 로그인했어요`));
-    const out = el('button', 'secondary', '로그아웃');
-    out.addEventListener('click', async () => {
-      out.disabled = true;
-      try {
-        await api('POST', '/api/auth/logout');
-      } finally {
-        forgetLastViews();
-        location.href = '/';
-      }
-    });
-    box.append(out);
+    box.append(logoutButton());
     return;
   }
   if (me.connected) box.append(el('span', 'hint', '개발용 계정(.env)으로 쓰는 중이에요.'));

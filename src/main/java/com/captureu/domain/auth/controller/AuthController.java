@@ -81,6 +81,11 @@ public class AuthController {
 			log.warn("인스타 로그인 실패: {}", e.getMessage());
 			return redirect("/?login=failed");
 		}
+		catch (RuntimeException e) {
+			// 응답 형식 오류 등. 원문에 토큰이 섞일 수 있어 종류만 남긴다
+			log.warn("인스타 로그인 중 예상하지 못한 오류: {}", e.getClass().getSimpleName());
+			return redirect("/?login=failed");
+		}
 	}
 
 	@GetMapping("/me")

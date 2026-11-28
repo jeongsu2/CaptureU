@@ -11,12 +11,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param configId           비즈니스용 Facebook 로그인 구성 ID (권한 목록은 구성에 들어 있다)
  * @param redirectUri        Meta 대시보드의 유효한 OAuth 리디렉션 URI에 등록한 주소와 정확히 같아야 한다
  * @param tokenEncryptionKey 사용자 토큰 암호화 키 (Base64, 32바이트)
- * @param envFallback        로그인하지 않았을 때 .env의 IG_USER_ID·IG_ACCESS_TOKEN 계정을 쓸지 (로컬 개발용. 배포에서는 끈다)
+ * @param envFallback        로그인하지 않았을 때 .env의 IG_USER_ID·IG_ACCESS_TOKEN 계정을 쓸지. 로컬 개발 프로필에서만 켠다
  */
 @ConfigurationProperties("captureu.auth")
 public record AuthProperties(String appId, String appSecret, String configId,
 		@DefaultValue("http://localhost:8080/api/auth/callback") String redirectUri, String tokenEncryptionKey,
-		@DefaultValue("true") boolean envFallback) {
+		@DefaultValue("false") boolean envFallback) {
 
 	public boolean loginAvailable() {
 		return notBlank(appId) && notBlank(appSecret) && notBlank(configId) && notBlank(tokenEncryptionKey);
