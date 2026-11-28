@@ -135,7 +135,8 @@ public class TrackingService {
 				continue;
 			}
 			MediaInsights insights = reader.readInsights(media, ctx);
-			if (insights.isFailed()) {
+			// 비교 기준인 조회수가 없으면 저장하지 않고 다음 주기(허용 시간 안)에 다시 잰다
+			if (insights.isFailed() || insights.views() == null) {
 				failed++;
 				log.warn("추적 인사이트 실패 mediaId={} hours={} error={}", media.id(), due.get(), insights.error());
 				continue;
