@@ -139,6 +139,13 @@ public class RecommendationService {
 		return "LLM_ERROR: " + e.getClass().getSimpleName();
 	}
 
+	/** 추천이 속한 분석 ID. 접근 확인(#16)에 쓴다. */
+	public Long analysisIdOf(Long recommendationId) {
+		return repository.findById(recommendationId)
+			.map(Recommendation::getAnalysisId)
+			.orElseThrow(() -> new RecommendationNotFoundException(recommendationId));
+	}
+
 	public RecommendationResponse get(Long id) {
 		Recommendation r = repository.findById(id).orElseThrow(() -> new RecommendationNotFoundException(id));
 		List<Integer> adopted = adoptionRepository.findByRecommendationIdOrderByIdAsc(id)

@@ -32,7 +32,7 @@ public class AnalysisExceptionHandler {
 
 	@ExceptionHandler(AccountNotConnectedException.class)
 	ProblemDetail notConnected(AccountNotConnectedException e) {
-		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, e.getMessage());
 	}
 
 	@ExceptionHandler(AnalysisInProgressException.class)

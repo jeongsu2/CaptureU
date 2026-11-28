@@ -54,19 +54,24 @@ public class ReferenceAccountService {
 	 * 외부 조회는 트랜잭션 밖에서 하고, 모두 통과하면 한 트랜잭션으로 바꾼다.
 	 */
 	public List<ReferenceAccount> replace(String ownerIgUserId, List<String> rawUsernames) {
+		return replace(ownerIgUserId, null, rawUsernames);
+	}
+
+	/** @param accessToken 로그인 사용자의 토큰 (#16). null이면 .env 토큰 */
+	public List<ReferenceAccount> replace(String ownerIgUserId, String accessToken, List<String> rawUsernames) {
 		// 같은 사용자가 동시에 바꾸면 개수 제한이 깨지거나 유니크 키가 충돌한다 (버튼 두 번 클릭 등)
 		if (!inFlight.add(ownerIgUserId)) {
 			throw new ReferenceUpdateInProgressException();
 		}
 		try {
-			return doReplace(ownerIgUserId, rawUsernames);
+			return doReplace(ownerIgUserId, accessToken, rawUsernames);
 		}
 		finally {
 			inFlight.remove(ownerIgUserId);
 		}
 	}
 
-	private List<ReferenceAccount> doReplace(String ownerIgUserId, List<String> rawUsernames) {
+	private List<ReferenceAccount> doReplace(String ownerIgUserId, String accessToken, List<String> rawUsernames) {
 		// 1. 형식 검사: 외부 호출 전에 끝낸다
 		Set<String> usernames = new LinkedHashSet<>();
 		List<ReferenceRejection> rejections = new ArrayList<>();
@@ -94,7 +99,7 @@ public class ReferenceAccountService {
 		List<ReferenceAccount> accepted = new ArrayList<>();
 		for (String username : usernames) {
 			try {
-				ReferenceProfile profile = reader.readProfile(ownerIgUserId, username, new ReadContext());
+				ReferenceProfile profile = reader.readProfile(ownerIgUserId, username, new ReadContext(accessToken));
 				if (ownerIgUserId.equals(profile.igId())) {
 					rejections.add(new ReferenceRejection(username, "SELF", "내 계정은 참고 계정으로 넣을 수 없어요"));
 					continue;

@@ -7,8 +7,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.captureu.domain.analysis.exception.AccountNotConnectedException;
-import com.captureu.domain.instagram.config.GraphApiProperties;
+import com.captureu.domain.auth.service.CurrentAccountResolver;
 import com.captureu.domain.profile.entity.Concept;
 import com.captureu.domain.profile.repository.CreatorProfileRepository;
 
@@ -17,23 +16,21 @@ import com.captureu.domain.profile.repository.CreatorProfileRepository;
 public class ProfileService {
 
 	private final CreatorProfileRepository repository;
-	private final GraphApiProperties graphProperties;
+	private final CurrentAccountResolver accounts;
 	private final Clock clock;
 
-	ProfileService(CreatorProfileRepository repository, GraphApiProperties graphProperties, Clock clock) {
+	ProfileService(CreatorProfileRepository repository, CurrentAccountResolver accounts, Clock clock) {
 		this.repository = repository;
-		this.graphProperties = graphProperties;
+		this.accounts = accounts;
 		this.clock = clock;
 	}
 
 	/** 연결된 계정의 컨셉. 아직 고르지 않았으면 비어 있다. */
 	@Transactional(readOnly = true)
 	public Optional<Concepts> current() {
-		String owner = graphProperties.igUserId();
-		if (owner == null || owner.isBlank()) {
-			return Optional.empty();
-		}
-		return repository.findById(owner).map(p -> new Concepts(p.getMainConcept(), p.getSubConcept()));
+		return accounts.find()
+			.flatMap(a -> repository.findById(a.igUserId()))
+			.map(p -> new Concepts(p.getMainConcept(), p.getSubConcept()));
 	}
 
 	@Transactional
@@ -44,10 +41,7 @@ public class ProfileService {
 		if (main == sub) {
 			throw new IllegalArgumentException("2순위 컨셉은 메인과 달라야 해요");
 		}
-		String owner = graphProperties.igUserId();
-		if (owner == null || owner.isBlank()) {
-			throw new AccountNotConnectedException();
-		}
+		String owner = accounts.current().igUserId();
 		repository.upsert(owner, main.name(), sub == null ? null : sub.name(), Instant.now(clock));
 		return new Concepts(main, sub);
 	}

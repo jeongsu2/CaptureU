@@ -16,10 +16,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
-import com.captureu.domain.analysis.exception.AccountNotConnectedException;
+import com.captureu.domain.auth.dto.CurrentAccount;
+import com.captureu.domain.auth.service.CurrentAccountResolver;
 import com.captureu.domain.instagram.client.InstagramAccountReader;
 import com.captureu.domain.instagram.client.ReadContext;
-import com.captureu.domain.instagram.config.GraphApiProperties;
 import com.captureu.domain.instagram.dto.MediaInsights;
 import com.captureu.domain.instagram.dto.MediaItem;
 import com.captureu.domain.tracking.dto.response.TrackedPostResponse;
@@ -48,15 +48,15 @@ public class TrackingService {
 	private final TrackingRepository trackingRepository;
 	private final MediaCheckpointRepository checkpointRepository;
 	private final InstagramAccountReader reader;
-	private final GraphApiProperties graphProperties;
+	private final CurrentAccountResolver accounts;
 	private final Clock clock;
 
 	public TrackingService(TrackingRepository trackingRepository, MediaCheckpointRepository checkpointRepository,
-			InstagramAccountReader reader, GraphApiProperties graphProperties, Clock clock) {
+			InstagramAccountReader reader, CurrentAccountResolver accounts, Clock clock) {
 		this.trackingRepository = trackingRepository;
 		this.checkpointRepository = checkpointRepository;
 		this.reader = reader;
-		this.graphProperties = graphProperties;
+		this.accounts = accounts;
 		this.clock = clock;
 	}
 
@@ -110,15 +110,40 @@ public class TrackingService {
 	public record CollectResult(boolean tracking, int recent, int saved, int failed, int apiCalls) {
 	}
 
-	/** 스케줄러가 부른다. 추적을 켠 계정의 최근 릴스 중 지금 잴 나이가 된 것만 인사이트를 받아 저장한다. */
+	/**
+	 * 스케줄러가 부른다. 추적을 켠 계정마다 그 계정의 토큰으로, 최근 릴스 중 지금 잴 나이가 된 것만 인사이트를 받아 저장한다.
+	 * 한 계정이 실패(토큰 만료 등)해도 다른 계정은 계속 잰다.
+	 */
+	public List<CollectResult> collectAll() {
+		List<CollectResult> results = new java.util.ArrayList<>();
+		for (Tracking t : trackingRepository.findByEnabledTrue()) {
+			Optional<CurrentAccount> account = accounts.forOwner(t.getIgUserId());
+			if (account.isEmpty()) {
+				log.warn("추적 중인데 토큰이 없어 건너뜀 igUserId={}", t.getIgUserId());
+				continue;
+			}
+			try {
+				results.add(collectDue(account.get()));
+			}
+			catch (RuntimeException e) {
+				log.warn("추적 수집 실패 igUserId={} error={}", t.getIgUserId(), e.getClass().getSimpleName());
+			}
+		}
+		return results;
+	}
+
+	/** 지금 계정(로그인 또는 .env) 하나만 잰다. */
 	public CollectResult collectDue() {
-		String owner = graphProperties.igUserId();
-		if (owner == null || owner.isBlank()
-				|| !trackingRepository.findById(owner).map(Tracking::isEnabled).orElse(false)) {
+		return accounts.find().map(this::collectDue).orElseGet(() -> new CollectResult(false, 0, 0, 0, 0));
+	}
+
+	CollectResult collectDue(CurrentAccount account) {
+		String owner = account.igUserId();
+		if (!trackingRepository.findById(owner).map(Tracking::isEnabled).orElse(false)) {
 			return new CollectResult(false, 0, 0, 0, 0);
 		}
 		Instant now = clock.instant();
-		ReadContext ctx = new ReadContext();
+		ReadContext ctx = new ReadContext(account.accessToken());
 		List<MediaItem> recent = reader.readRecentMedia(owner, RECENT_LIMIT, ctx)
 			.stream()
 			.filter(MediaItem::isReels)
@@ -154,10 +179,6 @@ public class TrackingService {
 	}
 
 	private String owner() {
-		String owner = graphProperties.igUserId();
-		if (owner == null || owner.isBlank()) {
-			throw new AccountNotConnectedException();
-		}
-		return owner;
+		return accounts.current().igUserId();
 	}
 }

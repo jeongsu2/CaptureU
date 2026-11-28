@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.captureu.domain.analysis.dto.response.AnalysisResponse;
+import com.captureu.domain.analysis.service.AnalysisAccessGuard;
 import com.captureu.domain.analysis.service.AnalysisService;
 import com.captureu.domain.analysis.service.OutlierService;
 import com.captureu.domain.analysis.service.OutlierService.AnalysisOutliers;
@@ -26,11 +27,14 @@ public class AnalysisController {
 	private final AnalysisService analysisService;
 	private final OutlierService outlierService;
 	private final ReportService reportService;
+	private final AnalysisAccessGuard guard;
 
-	AnalysisController(AnalysisService analysisService, OutlierService outlierService, ReportService reportService) {
+	AnalysisController(AnalysisService analysisService, OutlierService outlierService, ReportService reportService,
+			AnalysisAccessGuard guard) {
 		this.analysisService = analysisService;
 		this.outlierService = outlierService;
 		this.reportService = reportService;
+		this.guard = guard;
 	}
 
 	@PostMapping
@@ -41,18 +45,21 @@ public class AnalysisController {
 
 	@GetMapping("/{id}")
 	AnalysisResponse get(@PathVariable Long id) {
+		guard.check(id);
 		return analysisService.get(id);
 	}
 
 	/** 내 계정과 참고 계정별 아웃라이어 (조회수 중앙값 대비 배수, 게시 7일 이상 릴스). */
 	@GetMapping("/{id}/outliers")
 	AnalysisOutliers outliers(@PathVariable Long id) {
+		guard.check(id);
 		return outlierService.compute(id);
 	}
 
 	/** 비교 리포트: 계정별 아웃라이어 카드와 내 계정 스킵률·저장률 요약. */
 	@GetMapping("/{id}/report")
 	ReportService.AnalysisReport report(@PathVariable Long id) {
+		guard.check(id);
 		return reportService.build(id);
 	}
 }

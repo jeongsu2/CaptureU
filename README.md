@@ -89,6 +89,16 @@ com.captureu
 
 앱 안의 목 서버(`/mock-anthropic/v1/messages`)가 Messages API와 같은 모양으로 답해서, 결제 없이 추천 문구 생성과 썸네일 분석이 실제 SDK 호출 흐름을 끝까지 탄다. 답은 `[목]`이 붙은 고정 문장과 이미지 해시로 정한 특징이라 품질·비용 확인용은 아니다. 목 결과는 프롬프트 버전에 `-mock`이 붙어(`hook-v3-mock`, `thumb-v1-mock`) 나중에 실제 키로 분석할 때 캐시로 쓰이지 않고 다시 분석된다.
 
+### 인스타 로그인 설정 (#16)
+
+로그인하지 않으면 로컬 개발용으로 `.env`의 `IG_USER_ID`·`IG_ACCESS_TOKEN` 계정을 쓴다. 인스타 로그인을 쓰려면 `.env`에 아래 값을 넣는다 (`.env.example` 참고).
+
+1. Meta 앱 대시보드: 비즈니스용 Facebook 로그인 → 구성을 만들고 구성 ID를 `META_LOGIN_CONFIG_ID`에
+2. 같은 화면의 설정 → 유효한 OAuth 리디렉션 URI에 `META_REDIRECT_URI`(예: `http://localhost:8080/api/auth/callback`)를 등록
+3. 앱 ID·시크릿을 `META_APP_ID`·`META_APP_SECRET`에, `openssl rand -base64 32`로 만든 값을 `TOKEN_ENCRYPTION_KEY`에
+
+화면 위쪽의 "인스타로 로그인"을 누르면 Meta 로그인 → 돌아와서 토큰을 AES-GCM으로 암호화해 저장하고 세션에 계정을 넣는다. 분석·추천·썸네일·효과는 로그인한 계정의 것만 볼 수 있고(남의 분석 ID는 404), 추적 스케줄러는 추적을 켠 계정마다 그 계정의 토큰으로 돈다. 배포에서는 `AUTH_ENV_FALLBACK=false`로 `.env` 계정 대체를 끈다.
+
 ### 화면으로 써 보기
 
 `.env`를 채우고 앱을 실행한 뒤 http://localhost:8080 에서 컨셉 선택 → 참고 계정 등록 → 분석 → 비교 리포트 → 주제 입력·추천 → 문구 복사·채택까지 한 화면에서 할 수 있다.

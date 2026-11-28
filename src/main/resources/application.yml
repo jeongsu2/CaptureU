@@ -34,10 +34,27 @@ captureu:
     graph:
       access-token: ${IG_ACCESS_TOKEN:}
       ig-user-id: ${IG_USER_ID:}
+  auth:
+    # 인스타 로그인 (#16). 넷 다 있어야 로그인 버튼이 동작한다. 형식은 .env.example 참고
+    app-id: ${META_APP_ID:}
+    app-secret: ${META_APP_SECRET:}
+    config-id: ${META_LOGIN_CONFIG_ID:}
+    redirect-uri: ${META_REDIRECT_URI:http://localhost:8080/api/auth/callback}
+    token-encryption-key: ${TOKEN_ENCRYPTION_KEY:}
+    # 로그인하지 않았을 때 .env의 IG_USER_ID 계정을 쓴다 (로컬 개발용. 배포에서는 false)
+    env-fallback: ${AUTH_ENV_FALLBACK:true}
   llm:
     anthropic:
       # 없으면 LLM 없이 템플릿으로 추천한다 (#13)
       api-key: ${ANTHROPIC_API_KEY:}
+
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+      timeout: 7d
 
 management:
   endpoints:

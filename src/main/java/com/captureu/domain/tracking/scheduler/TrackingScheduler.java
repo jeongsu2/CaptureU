@@ -26,8 +26,7 @@ public class TrackingScheduler {
 			fixedDelayString = "${captureu.tracking.scheduler.interval:10m}")
 	public void collect() {
 		try {
-			CollectResult r = trackingService.collectDue();
-			if (r.tracking()) {
+			for (CollectResult r : trackingService.collectAll()) {
 				log.info("추적 수집 recent={} saved={} failed={} apiCalls={}", r.recent(), r.saved(), r.failed(),
 						r.apiCalls());
 			}

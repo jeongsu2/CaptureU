@@ -103,7 +103,8 @@ public class ReferenceAccountReader {
 		String safe = normalizeUsername(username);
 		ctx.beforeCall();
 		return client
-			.get(ownerIgUserId, Map.of("fields", "business_discovery.username(%s){%s}".formatted(safe, innerFields)))
+			.get(ownerIgUserId, Map.of("fields", "business_discovery.username(%s){%s}".formatted(safe, innerFields)),
+					ctx.accessToken())
 			.path("business_discovery");
 	}
 

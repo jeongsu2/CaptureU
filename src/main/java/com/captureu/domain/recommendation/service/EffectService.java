@@ -18,6 +18,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.captureu.domain.analysis.entity.Analysis;
+import com.captureu.domain.analysis.exception.AnalysisNotFoundException;
+import com.captureu.domain.analysis.repository.AnalysisRepository;
 import com.captureu.domain.analysis.service.OutlierCalculator;
 import com.captureu.domain.analysis.service.OwnPostsService;
 import com.captureu.domain.analysis.service.OwnPostsService.OwnPost;
@@ -49,20 +52,29 @@ public class EffectService {
 	private final OwnPostsService ownPostsService;
 	private final RecommendationAdoptionRepository adoptionRepository;
 	private final AdoptionRejectionRepository rejectionRepository;
+	private final AnalysisRepository analysisRepository;
 	private final Clock clock;
 
 	EffectService(OwnPostsService ownPostsService, RecommendationAdoptionRepository adoptionRepository,
-			AdoptionRejectionRepository rejectionRepository, Clock clock) {
+			AdoptionRejectionRepository rejectionRepository, AnalysisRepository analysisRepository, Clock clock) {
 		this.ownPostsService = ownPostsService;
 		this.adoptionRepository = adoptionRepository;
 		this.rejectionRepository = rejectionRepository;
+		this.analysisRepository = analysisRepository;
 		this.clock = clock;
+	}
+
+	/** 분석의 인스타 계정. 채택은 이 계정 것만 본다 (#16, 여러 사용자). */
+	private String ownerOf(Long analysisId) {
+		return analysisRepository.findById(analysisId)
+			.map(Analysis::getIgUserId)
+			.orElseThrow(() -> new AnalysisNotFoundException(analysisId));
 	}
 
 	@Transactional(readOnly = true)
 	public EffectReport effects(Long analysisId) {
 		List<OwnPost> posts = ownPostsService.load(analysisId);
-		List<RecommendationAdoption> adoptions = adoptionRepository.findAllByOrderByAdoptedAtAsc();
+		List<RecommendationAdoption> adoptions = adoptionRepository.findByOwner(ownerOf(analysisId));
 		Map<Long, Set<String>> rejected = rejectionRepository.findAll()
 			.stream()
 			.collect(Collectors.groupingBy(r -> r.getId().adoptionId(),
@@ -82,7 +94,10 @@ public class EffectService {
 	 */
 	@Transactional
 	public void decide(Long adoptionId, Long analysisId, String mediaId, boolean used) {
-		RecommendationAdoption adoption = adoptionRepository.findById(adoptionId)
+		List<RecommendationAdoption> owned = adoptionRepository.findByOwner(ownerOf(analysisId));
+		RecommendationAdoption adoption = owned.stream()
+			.filter(a -> a.getId().equals(adoptionId))
+			.findFirst()
 			.orElseThrow(() -> new AdoptionNotFoundException(adoptionId));
 		Instant now = Instant.now(clock);
 		if (!used) {
@@ -97,8 +112,7 @@ public class EffectService {
 			return;
 		}
 		OwnPost post = requireOwnPost(analysisId, mediaId);
-		boolean takenByOther = adoptionRepository.findAllByOrderByAdoptedAtAsc()
-			.stream()
+		boolean takenByOther = owned.stream()
 			.anyMatch(a -> !a.getId().equals(adoptionId) && a.isConfirmed() && mediaId.equals(a.getMatchedMediaId()));
 		if (takenByOther) {
 			throw new AdoptionConflictException("이 게시물은 이미 다른 채택 문구에 연결돼 있어요");

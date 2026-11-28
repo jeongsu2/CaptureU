@@ -38,6 +38,68 @@ async function api(method, url, body) {
   return data;
 }
 
+// 인스타 로그인 (#16): 로그인하면 그 계정으로, 아니면(로컬 개발) .env 계정으로 동작한다
+const LOGIN_MESSAGES = {
+  ok: ['로그인했어요.', false],
+  cancelled: ['로그인을 취소했어요.', false],
+  invalid: ['로그인 요청이 만료됐어요. 다시 시도해 주세요.', true],
+  failed: ['로그인에 실패했어요. 잠시 후 다시 시도해 주세요.', true],
+  'no-instagram': ['이 계정에 연결된 인스타 프로페셔널 계정을 찾지 못했어요.', true],
+  unavailable: ['아직 인스타 로그인을 쓸 수 없어요 (서버에 Meta 앱 설정이 없어요).', true],
+};
+
+function forgetLastViews() {
+  try {
+    localStorage.removeItem(LAST_ANALYSIS);
+    localStorage.removeItem(LAST_RECOMMENDATION);
+  } catch (e) { /* 저장이 막혀 있으면 지울 것도 없다 */ }
+}
+
+function showLoginResult() {
+  const params = new URLSearchParams(location.search);
+  const result = params.get('login');
+  if (!result) return;
+  const [text, error] = LOGIN_MESSAGES[result] || LOGIN_MESSAGES.failed;
+  setMsg($('#auth-msg'), text, error);
+  // 다른 계정으로 들어왔을 수 있으니 지난 분석 화면은 다시 띄우지 않는다
+  if (result === 'ok') forgetLastViews();
+  history.replaceState(null, '', location.pathname);
+}
+
+async function loadMe() {
+  const box = $('#auth');
+  box.replaceChildren();
+  let me;
+  try {
+    me = await api('GET', '/api/auth/me');
+  } catch (e) {
+    return;
+  }
+  if (me.source === 'LOGIN') {
+    box.append(el('span', null, `@${me.username || me.igUserId}로 로그인했어요`));
+    const out = el('button', 'secondary', '로그아웃');
+    out.addEventListener('click', async () => {
+      out.disabled = true;
+      try {
+        await api('POST', '/api/auth/logout');
+      } finally {
+        forgetLastViews();
+        location.href = '/';
+      }
+    });
+    box.append(out);
+    return;
+  }
+  if (me.connected) box.append(el('span', 'hint', '개발용 계정(.env)으로 쓰는 중이에요.'));
+  if (me.loginAvailable) {
+    const a = el('a', 'button', '인스타로 로그인');
+    a.href = '/api/auth/login';
+    box.append(a);
+  } else if (!me.connected) {
+    box.append(el('span', 'hint', '인스타 로그인을 아직 쓸 수 없어요 (서버에 Meta 앱 설정이 없어요).'));
+  }
+}
+
 function remember(key, id) {
   try { localStorage.setItem(key, String(id)); } catch (e) { /* 저장이 막혀 있어도 화면은 동작한다 */ }
 }
@@ -516,6 +578,8 @@ async function changeTracking(enabled) {
 $('#more-btn').addEventListener('click', () => changeTracking(true));
 $('#more-stop').addEventListener('click', () => changeTracking(false));
 
+showLoginResult();
+loadMe();
 loadConcepts();
 loadRefs();
 // 새로고침해도 지난 분석 리포트와 마지막 추천(채택 표시 포함)을 다시 보여 준다. 추천을 새로 만들지 않는다

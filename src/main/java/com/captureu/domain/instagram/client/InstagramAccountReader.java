@@ -197,7 +197,7 @@ public class InstagramAccountReader {
 
 	private JsonNode get(ReadContext ctx, String path, Map<String, String> params) {
 		ctx.beforeCall();
-		return client.get(path, params);
+		return client.get(path, params, ctx.accessToken());
 	}
 
 	/** 분석 전체를 멈춰야 하는 에러면 같은 분석의 다른 스레드도 멈추도록 신호를 남기고 던진다. */
