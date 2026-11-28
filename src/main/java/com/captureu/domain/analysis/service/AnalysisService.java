@@ -24,7 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.captureu.domain.analysis.dto.response.AnalysisResponse;
 import com.captureu.domain.analysis.entity.Analysis;
 import com.captureu.domain.analysis.entity.AnalysisStatus;
-import com.captureu.domain.analysis.exception.AccountNotConnectedException;
 import com.captureu.domain.analysis.exception.AnalysisInProgressException;
 import com.captureu.domain.analysis.exception.AnalysisNotFoundException;
 import com.captureu.domain.analysis.repository.AccountSnapshotRepository;
@@ -33,8 +32,9 @@ import com.captureu.domain.analysis.repository.AnalysisRepository;
 import com.captureu.domain.analysis.repository.MediaMetricSnapshotRepository;
 import com.captureu.domain.analysis.service.OwnAccountCollector.CollectedAccount;
 import com.captureu.domain.analysis.service.ReferenceCollector.CollectedReference;
+import com.captureu.domain.auth.dto.CurrentAccount;
+import com.captureu.domain.auth.service.CurrentAccountResolver;
 import com.captureu.domain.instagram.client.ReadContext;
-import com.captureu.domain.instagram.config.GraphApiProperties;
 import com.captureu.domain.instagram.exception.GraphApiException;
 
 import jakarta.annotation.PreDestroy;
@@ -55,7 +55,7 @@ public class AnalysisService {
 	private final AnalysisRepository analysisRepository;
 	private final AccountSnapshotRepository accountSnapshotRepository;
 	private final MediaMetricSnapshotRepository snapshotRepository;
-	private final GraphApiProperties graphProperties;
+	private final CurrentAccountResolver accounts;
 	private final Clock clock;
 
 	/**
@@ -75,7 +75,7 @@ public class AnalysisService {
 	AnalysisService(OwnAccountCollector collector, ReferenceCollector referenceCollector,
 			AnalysisReferenceRepository analysisReferenceRepository, AnalysisWriter writer,
 			AnalysisRepository analysisRepository, AccountSnapshotRepository accountSnapshotRepository,
-			MediaMetricSnapshotRepository snapshotRepository, GraphApiProperties graphProperties, Clock clock) {
+			MediaMetricSnapshotRepository snapshotRepository, CurrentAccountResolver accounts, Clock clock) {
 		this.collector = collector;
 		this.referenceCollector = referenceCollector;
 		this.analysisReferenceRepository = analysisReferenceRepository;
@@ -83,7 +83,7 @@ public class AnalysisService {
 		this.analysisRepository = analysisRepository;
 		this.accountSnapshotRepository = accountSnapshotRepository;
 		this.snapshotRepository = snapshotRepository;
-		this.graphProperties = graphProperties;
+		this.accounts = accounts;
 		this.clock = clock;
 	}
 
@@ -96,28 +96,30 @@ public class AnalysisService {
 	}
 
 	public AnalysisResponse requestForConnectedAccount() {
-		String igUserId = graphProperties.igUserId();
-		if (igUserId == null || igUserId.isBlank()) {
-			throw new AccountNotConnectedException();
-		}
-		return request(igUserId);
+		CurrentAccount account = accounts.current();
+		return request(account.igUserId(), account.accessToken());
 	}
 
 	public AnalysisResponse request(String igUserId) {
+		return request(igUserId, null);
+	}
+
+	/** @param accessToken 로그인 사용자의 토큰 (#16). null이면 .env 토큰 */
+	public AnalysisResponse request(String igUserId, String accessToken) {
 		if (!inFlight.add(igUserId)) {
 			throw new AnalysisInProgressException(igUserId);
 		}
 		try {
-			return collectAndSave(igUserId);
+			return collectAndSave(igUserId, accessToken);
 		}
 		finally {
 			inFlight.remove(igUserId);
 		}
 	}
 
-	private AnalysisResponse collectAndSave(String igUserId) {
+	private AnalysisResponse collectAndSave(String igUserId, String accessToken) {
 		Analysis analysis = writer.start(igUserId, Instant.now(clock));
-		ReadContext ctx = new ReadContext();
+		ReadContext ctx = new ReadContext(accessToken);
 		try {
 			Instant collectedAt = Instant.now(clock);
 			// 참고 계정은 내 계정과 서로 기다릴 이유가 없으므로 동시에 모은다 (#30).

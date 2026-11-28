@@ -4,6 +4,6 @@ package com.captureu.domain.analysis.exception;
 public class AccountNotConnectedException extends RuntimeException {
 
 	public AccountNotConnectedException() {
-		super("연결된 인스타 계정 ID가 없습니다 (.env의 IG_USER_ID)");
+		super("인스타 계정으로 로그인해 주세요");
 	}
 }

@@ -17,19 +17,29 @@ import com.captureu.domain.instagram.dto.MediaItem;
 public class ReadContext {
 
 	private final ReadContext parent;
+	/** 이 분석에서 쓸 사용자 토큰 (#16). null이면 .env의 IG_ACCESS_TOKEN을 쓴다. 로그·toString에 남기지 않는다. */
+	private final String accessToken;
 	private final AtomicInteger callCount = new AtomicInteger();
 	private final AtomicReference<RuntimeException> abortCause;
 	private final Set<String> unsupportedMetrics;
 	private volatile boolean mediaTruncated;
 
 	public ReadContext() {
-		this(null);
+		this((String) null);
+	}
+
+	public ReadContext(String accessToken) {
+		this.parent = null;
+		this.accessToken = accessToken;
+		this.abortCause = new AtomicReference<>();
+		this.unsupportedMetrics = ConcurrentHashMap.newKeySet();
 	}
 
 	private ReadContext(ReadContext parent) {
 		this.parent = parent;
-		this.abortCause = parent == null ? new AtomicReference<>() : parent.abortCause;
-		this.unsupportedMetrics = parent == null ? ConcurrentHashMap.newKeySet() : parent.unsupportedMetrics;
+		this.accessToken = parent.accessToken;
+		this.abortCause = parent.abortCause;
+		this.unsupportedMetrics = parent.unsupportedMetrics;
 	}
 
 	/** 호출 수는 따로 세고 상위에도 더하며, 멈춤 신호는 공유하는 하위 상태. */
@@ -51,6 +61,10 @@ public class ReadContext {
 		if (parent != null) {
 			parent.addCall();
 		}
+	}
+
+	String accessToken() {
+		return accessToken;
 	}
 
 	public int callCount() {

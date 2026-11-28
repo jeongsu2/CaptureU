@@ -13,7 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.captureu.domain.analysis.exception.AccountNotConnectedException;
-import com.captureu.domain.instagram.config.GraphApiProperties;
+import com.captureu.domain.auth.dto.CurrentAccount;
+import com.captureu.domain.auth.service.CurrentAccountResolver;
 import com.captureu.domain.reference.dto.request.ReplaceRequest;
 import com.captureu.domain.reference.dto.response.ReferenceAccountResponse;
 import com.captureu.domain.reference.exception.ReferenceAccountRejectedException;
@@ -28,22 +29,24 @@ import jakarta.validation.Valid;
 public class ReferenceAccountController {
 
 	private final ReferenceAccountService service;
-	private final GraphApiProperties graphProperties;
+	private final CurrentAccountResolver accounts;
 
-	ReferenceAccountController(ReferenceAccountService service, GraphApiProperties graphProperties) {
+	ReferenceAccountController(ReferenceAccountService service, CurrentAccountResolver accounts) {
 		this.service = service;
-		this.graphProperties = graphProperties;
+		this.accounts = accounts;
 	}
 
 	@GetMapping
 	List<ReferenceAccountResponse> list() {
-		return service.list(owner()).stream().map(ReferenceAccountResponse::of).toList();
+		return service.list(accounts.current().igUserId()).stream().map(ReferenceAccountResponse::of).toList();
 	}
 
 	/** 예: {"usernames": ["account_a", "account_b"]}. 기존 목록을 통째로 바꾼다. */
 	@PutMapping
 	List<ReferenceAccountResponse> replace(@Valid @RequestBody ReplaceRequest request) {
-		return service.replace(owner(), request.usernames()).stream().map(ReferenceAccountResponse::of).toList();
+		CurrentAccount account = accounts.current();
+		return service.replace(account.igUserId(), account.accessToken(), request.usernames())
+			.stream().map(ReferenceAccountResponse::of).toList();
 	}
 
 	@ExceptionHandler(ReferenceAccountRejectedException.class)
@@ -55,19 +58,11 @@ public class ReferenceAccountController {
 
 	@ExceptionHandler(AccountNotConnectedException.class)
 	ProblemDetail notConnected(AccountNotConnectedException e) {
-		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, e.getMessage());
 	}
 
 	@ExceptionHandler({ ReferenceUpdateInProgressException.class, DataIntegrityViolationException.class })
 	ProblemDetail conflict(RuntimeException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "참고 계정을 바꾸는 중이에요. 끝난 뒤 다시 시도해 주세요");
-	}
-
-	private String owner() {
-		String igUserId = graphProperties.igUserId();
-		if (igUserId == null || igUserId.isBlank()) {
-			throw new AccountNotConnectedException();
-		}
-		return igUserId;
 	}
 }

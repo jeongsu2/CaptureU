@@ -68,16 +68,26 @@ public class GraphApiClient {
 	 * @param params 쿼리 파라미터 (access_token은 자동으로 붙는다)
 	 */
 	public JsonNode get(String path, Map<String, String> params) {
-		if (!properties.hasAccessToken()) {
+		return get(path, params, null);
+	}
+
+	/**
+	 * 로그인한 사용자의 토큰으로 호출한다 (#16).
+	 *
+	 * @param accessToken null이면 .env의 IG_ACCESS_TOKEN
+	 */
+	public JsonNode get(String path, Map<String, String> params, String accessToken) {
+		String token = accessToken != null && !accessToken.isBlank() ? accessToken : properties.accessToken();
+		if (token == null || token.isBlank()) {
 			throw new GraphApiException(GraphApiErrorType.TOKEN_INVALID, 0, null, null,
-					"access token이 설정되지 않았습니다 (IG_ACCESS_TOKEN)");
+					"access token이 없습니다 (인스타 로그인 또는 .env의 IG_ACCESS_TOKEN)");
 		}
-		URI uri = buildUri(path, params);
+		URI uri = buildUri(path, params, token);
 		int[] attempts = { 0 };
 		try {
 			return retryTemplate.execute(() -> {
 				attempts[0]++;
-				return callOnce(uri);
+				return callOnce(uri, token);
 			});
 		}
 		catch (RetryException e) {
@@ -101,20 +111,20 @@ public class GraphApiClient {
 		return last instanceof RuntimeException r ? r : new IllegalStateException(last);
 	}
 
-	private JsonNode callOnce(URI uri) {
+	private JsonNode callOnce(URI uri, String token) {
 		try {
 			return restClient.get().uri(uri).exchange((request, response) -> {
 				usageTracker.record(response.getHeaders());
 				int status = response.getStatusCode().value();
 				String body = readBody(response.getBody());
 				if (status >= 400) {
-					throw toException(status, body);
+					throw toException(status, body, token);
 				}
 				JsonNode json = parseSuccessBody(status, body);
 				if (json.has("error")) {
-					throw toException(status, body);
+					throw toException(status, body, token);
 				}
-				maskPagingUrls(json);
+				maskPagingUrls(json, token);
 				return json;
 			});
 		}
@@ -124,7 +134,7 @@ public class GraphApiClient {
 		}
 		catch (RestClientException e) {
 			// 타임아웃, 연결 실패 등. 메시지에 요청 URL(토큰 포함)이 들어 있으므로 반드시 가린다.
-			throw new GraphApiException(GraphApiErrorType.TEMPORARY, 0, null, null, mask(e.getMessage()));
+			throw new GraphApiException(GraphApiErrorType.TEMPORARY, 0, null, null, mask(e.getMessage(), token));
 		}
 	}
 
@@ -141,7 +151,7 @@ public class GraphApiClient {
 		}
 	}
 
-	private GraphApiException toException(int status, String body) {
+	private GraphApiException toException(int status, String body, String token) {
 		Integer code = null;
 		Integer subcode = null;
 		boolean isTransient = false;
@@ -160,23 +170,23 @@ public class GraphApiClient {
 			message = body.length() > 200 ? body.substring(0, 200) : body;
 		}
 		GraphApiErrorType type = GraphApiErrorClassifier.classify(status, code, subcode, isTransient);
-		return new GraphApiException(type, status, code, subcode, mask(message));
+		return new GraphApiException(type, status, code, subcode, mask(message, token));
 	}
 
 	/** 응답 어디에 있든 paging.next/previous URL의 토큰을 가린다. 호출자가 응답을 로그에 남겨도 새지 않게 한다. */
-	private void maskPagingUrls(JsonNode node) {
+	private void maskPagingUrls(JsonNode node, String token) {
 		if (node instanceof ObjectNode obj) {
 			JsonNode paging = obj.get("paging");
 			if (paging instanceof ObjectNode p) {
 				for (String key : new String[] { "next", "previous" }) {
 					if (p.hasNonNull(key)) {
-						p.put(key, mask(p.get(key).asString()));
+						p.put(key, mask(p.get(key).asString(), token));
 					}
 				}
 			}
 		}
 		for (JsonNode child : node.values()) {
-			maskPagingUrls(child);
+			maskPagingUrls(child, token);
 		}
 	}
 
@@ -184,12 +194,12 @@ public class GraphApiClient {
 	 * 값은 직접 인코딩한다. 스프링의 쿼리 인코딩은 '+'를 그대로 두는데, 서버는 이를 공백으로 읽으므로
 	 * (예: since=...+09:00) '+'만 따로 %2B로 바꾼다. fields 값의 {}는 인코딩되고 (), 쉼표는 그대로 둔다.
 	 */
-	private URI buildUri(String path, Map<String, String> params) {
+	private URI buildUri(String path, Map<String, String> params, String token) {
 		UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
 			.pathSegment(properties.apiVersion())
 			.path("/" + path);
 		params.forEach((key, value) -> builder.queryParam(encode(key), encode(value)));
-		builder.queryParam("access_token", encode(properties.accessToken()));
+		builder.queryParam("access_token", encode(token));
 		return builder.build(true).toUri();
 	}
 
@@ -197,8 +207,8 @@ public class GraphApiClient {
 		return UriUtils.encodeQueryParam(value, StandardCharsets.UTF_8).replace("+", "%2B");
 	}
 
-	private String mask(String text) {
-		return TokenMasker.mask(text, properties.accessToken());
+	private static String mask(String text, String token) {
+		return TokenMasker.mask(text, token);
 	}
 
 	private static String readBody(InputStream body) throws IOException {

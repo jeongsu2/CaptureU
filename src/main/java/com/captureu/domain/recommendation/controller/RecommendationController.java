@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.captureu.domain.analysis.service.AnalysisAccessGuard;
 import com.captureu.domain.recommendation.dto.request.AdoptionRequest;
 import com.captureu.domain.recommendation.dto.request.RecommendationRequest;
 import com.captureu.domain.recommendation.exception.InvalidHookIndexException;
@@ -30,27 +31,32 @@ import jakarta.validation.Valid;
 public class RecommendationController {
 
 	private final RecommendationService recommendationService;
+	private final AnalysisAccessGuard guard;
 
-	RecommendationController(RecommendationService recommendationService) {
+	RecommendationController(RecommendationService recommendationService, AnalysisAccessGuard guard) {
 		this.recommendationService = recommendationService;
+		this.guard = guard;
 	}
 
 	/** 분석 결과를 바탕으로 다음 게시물 주제에 맞는 추천을 만든다. 같은 분석에 여러 번 요청할 수 있다. */
 	@PostMapping("/api/analyses/{analysisId}/recommendations")
 	ResponseEntity<RecommendationResponse> recommend(@PathVariable Long analysisId,
 			@Valid @RequestBody RecommendationRequest request) {
+		guard.check(analysisId);
 		RecommendationResponse response = recommendationService.recommend(analysisId, request.topic());
 		return ResponseEntity.created(URI.create("/api/recommendations/" + response.id())).body(response);
 	}
 
 	@GetMapping("/api/recommendations/{id}")
 	RecommendationResponse get(@PathVariable Long id) {
+		guard.check(recommendationService.analysisIdOf(id));
 		return recommendationService.get(id);
 	}
 
 	/** 첫 줄 후보 하나를 채택한다. 예: {"hookIndex": 0} */
 	@PostMapping("/api/recommendations/{id}/adoptions")
 	ResponseEntity<AdoptionResponse> adopt(@PathVariable Long id, @Valid @RequestBody AdoptionRequest request) {
+		guard.check(recommendationService.analysisIdOf(id));
 		AdoptionResponse response = recommendationService.adopt(id, request.hookIndex());
 		return ResponseEntity.status(HttpStatus.CREATED).body(response);
 	}

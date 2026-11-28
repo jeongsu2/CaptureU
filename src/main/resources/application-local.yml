@@ -3,7 +3,12 @@
 spring:
   docker:
     compose:
-      lifecycle-management: start-only
+      lifecycle-captureu:
+  auth:
+    # 로컬 개발: 로그인하지 않으면 .env의 IG_USER_ID·IG_ACCESS_TOKEN 계정으로 동작한다
+    env-fallback: ${AUTH_ENV_FALLBACK:true}
+
+management: start-only
 
 management:
   endpoint:

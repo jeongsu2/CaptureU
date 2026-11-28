@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.captureu.domain.analysis.service.AnalysisAccessGuard;
 import com.captureu.domain.recommendation.dto.request.MatchRequest;
 import com.captureu.domain.recommendation.exception.AdoptionConflictException;
 import com.captureu.domain.recommendation.exception.AdoptionNotFoundException;
@@ -24,20 +25,24 @@ import jakarta.validation.Valid;
 public class EffectController {
 
 	private final EffectService effectService;
+	private final AnalysisAccessGuard guard;
 
-	EffectController(EffectService effectService) {
+	EffectController(EffectService effectService, AnalysisAccessGuard guard) {
 		this.effectService = effectService;
+		this.guard = guard;
 	}
 
 	/** 이 분석 시점 게시물로 채택한 문구를 쓴 게시물을 찾고, 내 중앙값과 비교한다. */
 	@GetMapping("/api/analyses/{analysisId}/effects")
 	EffectReport effects(@PathVariable Long analysisId) {
+		guard.check(analysisId);
 		return effectService.effects(analysisId);
 	}
 
 	/** "이 게시물에 썼어요"(used=true) / "아니에요"(used=false). 예: {"analysisId":3,"mediaId":"179...","used":true} */
 	@PostMapping("/api/adoptions/{adoptionId}/match")
 	ResponseEntity<Void> decide(@PathVariable Long adoptionId, @Valid @RequestBody MatchRequest request) {
+		guard.check(request.analysisId());
 		effectService.decide(adoptionId, request.analysisId(), request.mediaId(), request.used());
 		return ResponseEntity.noContent().build();
 	}
