@@ -1,0 +1,10 @@
+# 결제 없이 Claude 호출 흐름을 확인하는 목 모드. 앱 안의 목 서버(MockAnthropicController)로 요청을 보낸다.
+# 실행: ./gradlew bootRun --args='--spring.profiles.active=local,mock-llm'
+# .env의 ANTHROPIC_API_KEY는 쓰지 않는다. 결과의 프롬프트 버전에 -mock이 붙어 실제 분석 결과와 섞이지 않는다.
+captureu:
+  llm:
+    anthropic:
+      api-key: mock-key
+      base-url: http://localhost:${server.port:8080}/mock-anthropic
+      timeout: 10s
+      mock: true

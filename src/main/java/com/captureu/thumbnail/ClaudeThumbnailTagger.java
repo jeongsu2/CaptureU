@@ -51,6 +51,11 @@ class ClaudeThumbnailTagger implements ThumbnailTagger, AutoCloseable {
 	}
 
 	@Override
+	public String promptVersion() {
+		return properties.promptVersion(PROMPT_VERSION);
+	}
+
+	@Override
 	public Tagged tag(ThumbnailImageFetcher.Image image) {
 		if (client == null) {
 			throw new IllegalStateException("ANTHROPIC_API_KEY가 없습니다");
@@ -88,7 +93,7 @@ class ClaudeThumbnailTagger implements ThumbnailTagger, AutoCloseable {
 		String model = response.model().asString();
 		long in = response.usage().inputTokens();
 		long out = response.usage().outputTokens();
-		return new Tagged(tags, model, PROMPT_VERSION, (int) in, (int) out, LlmPricing.cost(model, in, out));
+		return new Tagged(tags, model, promptVersion(), (int) in, (int) out, LlmPricing.cost(model, in, out));
 	}
 
 	@Override

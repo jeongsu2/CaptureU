@@ -104,10 +104,7 @@ public class ThumbnailService {
 		long start = System.nanoTime();
 		AnalysisOutliers outliers = outlierService.compute(analysisId);
 		List<String> selected = accounts(outliers).stream().flatMap(a -> select(a).stream()).distinct().toList();
-		java.util.Set<String> done = mediaThumbnailRepository.findAllById(selected)
-			.stream()
-			.map(MediaThumbnail::getMediaId)
-			.collect(Collectors.toSet());
+		java.util.Set<String> done = currentLinks(selected).keySet();
 		List<String> todo = selected.stream().filter(id -> !done.contains(id)).toList();
 		int already = selected.size() - todo.size();
 		if (!tagger.enabled()) {
@@ -177,13 +174,23 @@ public class ThumbnailService {
 		if (existing != null) {
 			// 같은 이미지를 다른 게시물이 분석 중이면 끝나길 기다렸다가 그 결과를 쓴다
 			existing.join();
-			if (!featureRepository.existsById(hash)) {
+			if (!featureRepository.findById(hash).filter(this::current).isPresent()) {
 				throw new IllegalStateException("같은 이미지 분석이 실패했습니다");
 			}
 		}
 		else {
 			try {
-				if (!featureRepository.existsById(hash)) {
+				java.util.Optional<ThumbnailFeature> saved = featureRepository.findById(hash);
+				if (saved.isPresent() && !current(saved.get())) {
+					// 프롬프트 버전이 바뀌었거나 목 서버 결과라 다시 분석해 덮어쓴다
+					Tagged t = tagger.tag(image);
+					ThumbnailFeature stale = saved.get();
+					stale.retag(t.tags(), t.model(), t.promptVersion(), t.inputTokens(), t.outputTokens(), t.costUsd(),
+							now);
+					featureRepository.save(stale);
+					outcome = new Outcome(true, t.costUsd(), true);
+				}
+				else if (saved.isEmpty()) {
 					Tagged t = tagger.tag(image);
 					try {
 						featureRepository.save(ThumbnailFeature.of(hash, t.tags(), t.model(), t.promptVersion(),
@@ -203,6 +210,14 @@ public class ThumbnailService {
 				mine.complete(null);
 			}
 		}
+		java.util.Optional<MediaThumbnail> link = mediaThumbnailRepository.findById(mediaId);
+		if (link.isPresent()) {
+			if (!link.get().getImageHash().equals(hash)) {
+				link.get().relink(hash, now);
+				mediaThumbnailRepository.save(link.get());
+			}
+			return outcome;
+		}
 		try {
 			mediaThumbnailRepository.save(new MediaThumbnail(mediaId, hash, now));
 		}
@@ -213,6 +228,30 @@ public class ThumbnailService {
 			}
 		}
 		return outcome;
+	}
+
+	private boolean current(ThumbnailFeature feature) {
+		return feature.getPromptVersion().equals(tagger.promptVersion());
+	}
+
+	/** 게시물 → 지금 버전으로 분석한 특징. 다른 버전(예전 프롬프트, 목 서버) 결과는 없는 것으로 본다. */
+	private Map<String, ThumbnailFeature> currentLinks(List<String> mediaIds) {
+		Map<String, String> hashByMedia = mediaThumbnailRepository.findAllById(mediaIds)
+			.stream()
+			.collect(Collectors.toMap(MediaThumbnail::getMediaId, MediaThumbnail::getImageHash));
+		Map<String, ThumbnailFeature> features = featureRepository
+			.findAllById(hashByMedia.values().stream().distinct().toList())
+			.stream()
+			.filter(this::current)
+			.collect(Collectors.toMap(ThumbnailFeature::getImageHash, Function.identity()));
+		Map<String, ThumbnailFeature> result = new java.util.HashMap<>();
+		hashByMedia.forEach((media, hash) -> {
+			ThumbnailFeature f = features.get(hash);
+			if (f != null) {
+				result.put(media, f);
+			}
+		});
+		return result;
 	}
 
 	static String sha256(byte[] bytes) {
@@ -335,19 +374,14 @@ public class ThumbnailService {
 			.flatMap(a -> a.outliers().posts().stream().map(ScoredPost::mediaId))
 			.distinct()
 			.toList();
-		Map<String, String> hashByMedia = mediaThumbnailRepository.findAllById(ids)
-			.stream()
-			.collect(Collectors.toMap(MediaThumbnail::getMediaId, MediaThumbnail::getImageHash));
-		Map<String, ThumbnailFeature> features = featureRepository.findAllById(hashByMedia.values().stream().distinct().toList())
-			.stream()
-			.collect(Collectors.toMap(ThumbnailFeature::getImageHash, Function.identity()));
+		Map<String, ThumbnailFeature> features = currentLinks(ids);
 
 		List<AccountThumbnails> result = new ArrayList<>();
 		for (AccountResult a : accounts) {
 			List<ThumbnailFeature> top = new ArrayList<>();
 			List<ThumbnailFeature> rest = new ArrayList<>();
 			for (ScoredPost p : a.outliers().posts()) {
-				ThumbnailFeature f = features.get(hashByMedia.get(p.mediaId()));
+				ThumbnailFeature f = features.get(p.mediaId());
 				if (f != null) {
 					(p.outlier() ? top : rest).add(f);
 				}

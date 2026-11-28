@@ -71,6 +71,7 @@ class ThumbnailIntegrationTest {
 		jdbc.update("delete from reference_account");
 		given(reader.readAccount(eq("100"), any())).willReturn(new AccountInfo("100", "tester", 100, 1));
 		given(reader.readDemographics(eq("100"), any())).willReturn(List.of());
+		given(tagger.promptVersion()).willReturn("thumb-v1");
 	}
 
 	/** 조회수 1000짜리 5개와 5000짜리 3개(아웃라이어). 아웃라이어 썸네일만 얼굴 클로즈업. 두 게시물은 같은 이미지. */
@@ -131,6 +132,32 @@ class ThumbnailIntegrationTest {
 		assertThat(rec.result().thumbnailSignals()).isNotEmpty();
 		assertThat(rec.result().thumbnail().layout()).contains("얼굴을 화면의 1/3 이상");
 		assertThat(rec.result().thumbnail().rationale()).contains("내 계정(잘된 썸네일 100% vs 나머지 0%)");
+	}
+
+	@Test
+	void 버전이_다른_결과는_다시_분석해_덮어쓰고_비교에_섞지_않는다() {
+		Long analysisId = analyze();
+		given(tagger.enabled()).willReturn(true);
+		given(tagger.promptVersion()).willReturn("thumb-v1-mock");
+		given(tagger.tag(any())).willAnswer(inv -> new Tagged(new ThumbnailTags(false, 0, TextSize.NONE, "",
+				Tone.DARK, Composition.SCENE), "claude-mock", "thumb-v1-mock", 10, 10, null));
+		assertThat(thumbnailService.tag(analysisId).tagged()).isEqualTo(7);
+
+		// 실제 분석으로 바꾸면 목 결과는 없는 것으로 보고 다시 분석한다
+		given(tagger.promptVersion()).willReturn("thumb-v1");
+		assertThat(thumbnailService.compare(analysisId).accounts().get(0).outlierTagged()).isZero();
+		given(tagger.tag(any())).willAnswer(inv -> new Tagged(new ThumbnailTags(true, 1, TextSize.LARGE, "",
+				Tone.BRIGHT, Composition.CENTER_SUBJECT), "claude-opus-5-5", "thumb-v1", 1500, 120,
+				new java.math.BigDecimal("0.008400")));
+
+		TagResult real = thumbnailService.tag(analysisId);
+
+		assertThat(real.alreadyTagged()).isZero();
+		assertThat(real.tagged()).isEqualTo(7);
+		assertThat(real.reused()).isEqualTo(1);
+		assertThat(jdbc.queryForObject("select count(*) from thumbnail_feature where prompt_version = 'thumb-v1-mock'",
+				Integer.class)).isZero();
+		assertThat(thumbnailService.compare(analysisId).accounts().get(0).outlierTagged()).isEqualTo(3);
 	}
 
 	@Test

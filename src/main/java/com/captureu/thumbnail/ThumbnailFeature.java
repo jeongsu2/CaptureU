@@ -78,6 +78,19 @@ public class ThumbnailFeature implements Persistable<String> {
 			BigDecimal cost, Instant now) {
 		ThumbnailFeature f = new ThumbnailFeature();
 		f.imageHash = hash;
+		f.isNew = true;
+		f.fill(tags, model, promptVersion, in, out, cost, now);
+		return f;
+	}
+
+	/** 버전이 바뀌어 다시 분석한 결과로 덮어쓴다. */
+	void retag(ThumbnailTags tags, String model, String promptVersion, int in, int out, BigDecimal cost, Instant now) {
+		fill(tags, model, promptVersion, in, out, cost, now);
+	}
+
+	private void fill(ThumbnailTags tags, String model, String promptVersion, int in, int out, BigDecimal cost,
+			Instant now) {
+		ThumbnailFeature f = this;
 		f.faceCloseUp = tags.faceCloseUp();
 		f.personCount = Math.max(0, tags.personCount());
 		f.textSize = tags.textSize() == null ? TextSize.NONE : tags.textSize();
@@ -91,8 +104,6 @@ public class ThumbnailFeature implements Persistable<String> {
 		f.outputTokens = out;
 		f.costUsd = cost;
 		f.createdAt = now;
-		f.isNew = true;
-		return f;
 	}
 
 	@Override
