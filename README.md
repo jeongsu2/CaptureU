@@ -66,6 +66,14 @@
 ./gradlew test      # 테스트 (Testcontainers로 MySQL, Redis를 따로 띄움)
 ```
 
+### Claude 키 없이 LLM 경로 확인하기 (목 모드)
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=local,mock-llm'
+```
+
+앱 안의 목 서버(`/mock-anthropic/v1/messages`)가 Messages API와 같은 모양으로 답해서, 결제 없이 추천 문구 생성과 썸네일 분석이 실제 SDK 호출 흐름을 끝까지 탄다. 답은 `[목]`이 붙은 고정 문장과 이미지 해시로 정한 특징이라 품질·비용 확인용은 아니다. 목 결과는 프롬프트 버전에 `-mock`이 붙어(`hook-v3-mock`, `thumb-v1-mock`) 나중에 실제 키로 분석할 때 캐시로 쓰이지 않고 다시 분석된다.
+
 ### 화면으로 써 보기
 
 `.env`를 채우고 앱을 실행한 뒤 http://localhost:8080 에서 컨셉 선택 → 참고 계정 등록 → 분석 → 비교 리포트 → 주제 입력·추천 → 문구 복사·채택까지 한 화면에서 할 수 있다.

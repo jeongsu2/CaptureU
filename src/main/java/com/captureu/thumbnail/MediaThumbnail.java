@@ -40,6 +40,12 @@ public class MediaThumbnail implements Persistable<String> {
 		this.isNew = true;
 	}
 
+	/** 같은 게시물의 썸네일 이미지가 바뀌었을 때. */
+	void relink(String imageHash, Instant now) {
+		this.imageHash = imageHash;
+		this.taggedAt = now;
+	}
+
 	@Override
 	public String getId() {
 		return mediaId;

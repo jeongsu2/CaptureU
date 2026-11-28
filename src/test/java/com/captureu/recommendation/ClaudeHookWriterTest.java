@@ -64,7 +64,7 @@ class ClaudeHookWriterTest {
 
 	private ClaudeHookWriter writer() {
 		return new ClaudeHookWriter(new LlmProperties("test-key", "claude-opus-5-5",
-				"http://127.0.0.1:" + server.getAddress().getPort(), Duration.ofSeconds(5), true));
+				"http://127.0.0.1:" + server.getAddress().getPort(), Duration.ofSeconds(5), true, false));
 	}
 
 	private static String message(String stopReason, String text) {
@@ -103,6 +103,22 @@ class ClaudeHookWriterTest {
 		assertThat(betaHeader.get()).contains("server-side-fallback-2026-07-01");
 		String prompt = body.get("messages").get(0).toString();
 		assertThat(prompt).contains("겨울 출근룩").contains("QUESTION [COMMON]").contains("@ref.a 9개 중 4개");
+	}
+
+	@Test
+	void 목_서버로_결제_없이_실제_SDK_호출_흐름을_끝까지_돈다() throws Exception {
+		try (var mock = new com.captureu.llm.MockAnthropicServer();
+				ClaudeHookWriter writer = new ClaudeHookWriter(mock.properties())) {
+			LlmDraft result = writer.write("겨울 출근룩", summary, null, List.of());
+
+			assertThat(result.draft().hooks()).hasSize(5).first().satisfies(h -> {
+				assertThat(h.type()).isEqualTo(HookType.QUESTION);
+				assertThat(h.text()).startsWith("[목] 겨울 출근룩");
+			});
+			assertThat(result.model()).isEqualTo(com.captureu.llm.MockAnthropicController.MODEL);
+			assertThat(result.costUsd()).isNull();
+			assertThat(writer.promptVersion()).isEqualTo("hook-v3-mock");
+		}
 	}
 
 	@Test
@@ -162,7 +178,7 @@ class ClaudeHookWriterTest {
 	@Test
 	void 키가_없으면_사용하지_않는다() {
 		assertThat(new ClaudeHookWriter(new LlmProperties(" ", "claude-opus-5-5", "https://api.anthropic.com",
-				Duration.ofSeconds(5), true)).enabled()).isFalse();
+				Duration.ofSeconds(5), true, false)).enabled()).isFalse();
 		assertThat(ClaudeHookWriter.cost("unknown-model", 1, 1)).isNull();
 	}
 }

@@ -80,7 +80,7 @@ public class RecommendationService {
 				draft = llm.draft();
 				generator = Generator.LLM;
 				model = llm.model();
-				promptVersion = ClaudeHookWriter.PROMPT_VERSION;
+				promptVersion = claude.promptVersion();
 				inputTokens = llm.inputTokens();
 				outputTokens = llm.outputTokens();
 				cost = llm.costUsd();

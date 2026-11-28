@@ -77,6 +77,10 @@ class ClaudeHookWriter implements AutoCloseable {
 		return client != null;
 	}
 
+	String promptVersion() {
+		return properties.promptVersion(PROMPT_VERSION);
+	}
+
 	LlmDraft write(String topic, PatternSummary summary, Concepts concepts, List<ThumbnailSignal> thumbnails) {
 		if (client == null) {
 			throw new IllegalStateException("ANTHROPIC_API_KEY가 없습니다");
