@@ -1,0 +1,20 @@
+# 로컬에서 인스타 로그인을 확인할 때 쓰는 HTTPS 실행 (#16).
+# Meta는 리디렉션 URL로 HTTPS만 받고 localhost는 거절해서, 127.0.0.1을 가리키는 localtest.me 주소를 쓴다.
+# 실행: --spring.profiles.active=local,https → https://localtest.me:8443
+# 키 저장소는 자체 서명 인증서로 직접 만든다 (secrets/는 커밋되지 않는다):
+#   keytool -genkeypair -alias captureu-local -keyalg RSA -storetype PKCS12 -keystore secrets/localtest.p12 \
+#     -dname "CN=localtest.me" -ext "SAN=dns:localtest.me,dns:localhost"
+# .env: LOCAL_SSL_PASSWORD (Meta 리디렉션 URL에는 https://localtest.me:8443/api/auth/callback 등록)
+server:
+  port: ${HTTPS_PORT:8443}
+  ssl:
+    key-store: ${LOCAL_SSL_KEYSTORE:file:secrets/localtest.p12}
+    key-store-password: ${LOCAL_SSL_PASSWORD:}
+    key-store-type: PKCS12
+  servlet:
+    session:
+      cookie:
+        secure: true
+captureu:
+  auth:
+    redirect-uri: ${META_REDIRECT_URI:https://localtest.me:${server.port}/api/auth/callback}
