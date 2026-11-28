@@ -149,6 +149,16 @@ curl http://localhost:8080/api/analyses/{id}/effects
 
 새 게시물 캡션 첫 줄을 채택 문구와 비교해(공백·기호를 뺀 글자 2개 묶음이 겹치는 정도) 충분히 비슷하면 자동으로 연결하고, 애매하면 "이 게시물에 썼나요?"로 묻는다 (`POST /api/adoptions/{id}/match`). 연결한 게시물 중 게시 7일이 지난 것의 스킵률·저장률·조회수를 내 중앙값과 비교한다. 주제·시기도 다르므로 차이를 추천 효과로 단정하지 않는다는 안내를 함께 보여 준다.
 
+
+9. (선택) 더 이어서 하기 — 올린 릴스의 초반 반응 추적
+
+```bash
+curl -X PUT http://localhost:8080/api/tracking -H 'Content-Type: application/json' -d '{"enabled":true}'
+curl http://localhost:8080/api/tracking
+```
+
+추적을 켠 계정만 10분마다 최근 릴스를 확인해 게시 후 1·3·6·12·24·48·72시간, 이후 7일까지 하루 1번 조회수·스킵률을 쌓는다 (API는 지금 누적값만 주기 때문). 각 릴스의 가장 최근 나이 값을 같은 나이의 지난 릴스 중앙값과 비교해 2배 이상이면 초반 급상승으로 표시한다. 지난 릴스가 3개 이상 쌓여야 비교한다.
+
 ## 진행
 
 작업은 [Issues](../../issues)와 [Milestones](../../milestones)로 관리한다.

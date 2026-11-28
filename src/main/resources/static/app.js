@@ -395,6 +395,7 @@ $('#topic-form').addEventListener('submit', async (ev) => {
 
 function showAfterAdoption(scroll) {
   $('#step-more').classList.remove('hidden');
+  loadTracking();
   if (scroll) $('#step-more').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -466,10 +467,54 @@ function renderRecommendation(rec) {
   }
 }
 
-// 더 이어서 하기 (M5에서 게시 후 추적을 붙인다)
-$('#more-btn').addEventListener('click', () => {
-  setMsg($('#more-msg'), '준비 중이에요. 추천대로 올린 릴스의 초반 반응 추적은 곧 열려요.');
-});
+// 더 이어서 하기 (#5): 추적을 켜면 새 릴스의 게시 후 1·3·6·12·24시간… 조회수를 쌓아 지난 릴스와 같은 나이끼리 비교한다
+function trackedPostText(p) {
+  const title = p.captionFirstLine || '(첫 줄 없음)';
+  const now = `게시 ${p.checkpointHours}시간 조회수 ${p.views ?? '-'}회`;
+  if (p.multiple == null) {
+    return `${title} · ${now} (같은 나이의 지난 릴스가 ${p.baselineCount}개라 아직 비교하지 않아요. 3개부터 비교해요)`;
+  }
+  return `${title} · ${now}, 평소(지난 릴스 ${p.baselineCount}개 중앙값 ${Math.round(p.baselineViews)}회)의 ${p.multiple}배`
+    + (p.surge ? ' · 초반 급상승' : '');
+}
+
+function renderTracking(t) {
+  $('#more-btn').classList.toggle('hidden', t.enabled);
+  $('#more-stop').classList.toggle('hidden', !t.enabled);
+  const list = $('#tracked-posts');
+  list.replaceChildren();
+  t.posts.forEach((p) => list.append(el('li', null, trackedPostText(p))));
+  if (!t.enabled) {
+    setMsg($('#more-msg'), t.posts.length ? '추적을 껐어요. 지금까지 잰 값은 남아 있어요.' : '');
+  } else if (!t.posts.length) {
+    setMsg($('#more-msg'), '추적 중이에요. 새 릴스를 올리면 게시 1시간 뒤부터 10분 간격으로 확인해 반응을 재요.');
+  } else {
+    setMsg($('#more-msg'), '추적 중이에요. 최근 릴스를 같은 나이의 지난 릴스 조회수와 비교해요.');
+  }
+}
+
+async function loadTracking() {
+  try {
+    renderTracking(await api('GET', '/api/tracking'));
+  } catch (e) {
+    // 인스타 계정이 연결되지 않았으면 추적 상태를 보여 주지 않는다
+  }
+}
+
+async function changeTracking(enabled) {
+  const buttons = [$('#more-btn'), $('#more-stop')];
+  buttons.forEach((b) => { b.disabled = true; });
+  try {
+    renderTracking(await api('PUT', '/api/tracking', { enabled }));
+  } catch (e) {
+    setMsg($('#more-msg'), e.message, true);
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
+$('#more-btn').addEventListener('click', () => changeTracking(true));
+$('#more-stop').addEventListener('click', () => changeTracking(false));
 
 loadConcepts();
 loadRefs();

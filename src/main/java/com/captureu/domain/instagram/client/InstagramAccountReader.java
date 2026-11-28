@@ -92,6 +92,18 @@ public class InstagramAccountReader {
 		return new ArrayList<>(items.values());
 	}
 
+	/** 최근 게시물만 한 쪽 받는다 (최신순). 게시 직후 추적(#5)처럼 전체 목록이 필요 없을 때 호출을 아낀다. */
+	public List<MediaItem> readRecentMedia(String igUserId, int limit, ReadContext ctx) {
+		Map<String, String> params = new LinkedHashMap<>();
+		params.put("fields", MEDIA_FIELDS);
+		params.put("limit", String.valueOf(Math.min(limit, PAGE_SIZE)));
+		List<MediaItem> items = new ArrayList<>();
+		for (JsonNode m : get(ctx, igUserId + "/media", params).path("data")) {
+			toMediaItem(m).ifPresent(items::add);
+		}
+		return items;
+	}
+
 	/**
 	 * 게시물 인사이트. 릴스와 피드는 받을 수 있는 지표가 다르다.
 	 * 한 번에 요청했다가 거부되면 지표별로 다시 요청한다. 같은 게시물에서 다른 지표는 받았는데
