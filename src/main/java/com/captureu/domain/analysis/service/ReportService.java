@@ -1,0 +1,213 @@
+package com.captureu.domain.analysis.service;
+
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.captureu.domain.analysis.entity.AnalysisStatus;
+import com.captureu.domain.analysis.entity.IgMedia;
+import com.captureu.domain.analysis.entity.MediaMetricSnapshot;
+import com.captureu.domain.analysis.repository.AnalysisReferenceRepository;
+import com.captureu.domain.analysis.repository.IgMediaRepository;
+import com.captureu.domain.analysis.repository.MediaMetricSnapshotRepository;
+import com.captureu.domain.analysis.service.OutlierCalculator.AccountOutliers;
+import com.captureu.domain.analysis.service.OutlierCalculator.ScoredPost;
+import com.captureu.domain.analysis.service.OutlierService.AccountResult;
+import com.captureu.domain.analysis.service.OutlierService.AnalysisOutliers;
+import com.captureu.domain.analysis.util.CaptionHook;
+import com.captureu.domain.reference.service.ReferenceAccountService;
+
+/**
+ * 비교 리포트. 내 계정과 참고 계정의 아웃라이어 카드, 내 계정의 스킵률·저장률 요약을 한 번에 돌려준다.
+ * 저장하지 않고 요청할 때마다 분석 결과에서 계산한다.
+ */
+@Service
+@Transactional(readOnly = true)
+public class ReportService {
+
+	/** 계정마다 보여 줄 아웃라이어 카드 수. */
+	static final int MAX_CARDS = 5;
+
+	private final OutlierService outlierService;
+	private final AnalysisReferenceRepository analysisReferenceRepository;
+	private final MediaMetricSnapshotRepository snapshotRepository;
+	private final IgMediaRepository mediaRepository;
+
+	ReportService(OutlierService outlierService, AnalysisReferenceRepository analysisReferenceRepository,
+			MediaMetricSnapshotRepository snapshotRepository, IgMediaRepository mediaRepository) {
+		this.outlierService = outlierService;
+		this.analysisReferenceRepository = analysisReferenceRepository;
+		this.snapshotRepository = snapshotRepository;
+		this.mediaRepository = mediaRepository;
+	}
+
+	public AnalysisReport build(Long analysisId) {
+		AnalysisOutliers outliers = outlierService.compute(analysisId);
+		// 협업 게시물은 계정마다 스냅샷이 따로 있으므로 (계정, 게시물)로 찾는다
+		Map<String, MediaMetricSnapshot> snapshots = snapshotRepository.findByAnalysisId(analysisId)
+			.stream()
+			.collect(Collectors.toMap(s -> key(s.getAccountIgId(), s.getMediaId()), Function.identity()));
+		Map<String, IgMedia> media = mediaRepository
+			.findAllById(snapshots.values().stream().map(MediaMetricSnapshot::getMediaId).distinct().toList())
+			.stream()
+			.collect(Collectors.toMap(IgMedia::getId, Function.identity()));
+
+		AccountReport own = toAccountReport(outliers.own(), snapshots, media);
+		List<AccountReport> references = outliers.references()
+			.stream()
+			.map(r -> toAccountReport(r, snapshots, media))
+			.toList();
+		List<FailedReference> failed = analysisReferenceRepository.findByAnalysisIdOrderByIdAsc(analysisId)
+			.stream()
+			.filter(r -> r.getStatus() != AnalysisStatus.DONE)
+			.map(r -> new FailedReference(r.getUsername(), r.getFailureType()))
+			.toList();
+		return new AnalysisReport(analysisId, own,
+				ownSummary(outliers.own().accountKey(), outliers.own().outliers(), snapshots), references, failed,
+				references.size() < ReferenceAccountService.RECOMMENDED_REFERENCES);
+	}
+
+	private static String key(String account, String mediaId) {
+		return account + "|" + mediaId;
+	}
+
+	private AccountReport toAccountReport(AccountResult result, Map<String, MediaMetricSnapshot> snapshots,
+			Map<String, IgMedia> media) {
+		AccountOutliers o = result.outliers();
+		List<PostCard> cards = o.outliers()
+			.stream()
+			.limit(MAX_CARDS)
+			.map(p -> toCard(p, snapshots.get(key(result.accountKey(), p.mediaId())), media.get(p.mediaId())))
+			.filter(Objects::nonNull)
+			.toList();
+		return new AccountReport(result.username(), result.mine(), o.judgedCount(), o.excludedCount(),
+				o.medianViews(), o.meanViews(), o.outliers().size(), cards, o.youngMediaIds().size(), o.lowSample(),
+				hookTypeStats(o, media));
+	}
+
+	/**
+	 * 첫 줄 유형별로 판정한 릴스 수와 그중 아웃라이어 수 (#12). "이 계정에서는 어떤 유형의 첫 줄이 잘됐나"를 본다.
+	 * 광고 게시물은 성과가 다를 수 있어 따로 센다.
+	 */
+	static List<HookTypeStat> hookTypeStats(AccountOutliers o, Map<String, IgMedia> media) {
+		Map<CaptionHook.HookType, int[]> counts = new java.util.EnumMap<>(CaptionHook.HookType.class);
+		for (ScoredPost p : o.posts()) {
+			IgMedia m = media.get(p.mediaId());
+			if (m == null || m.getHookType() == null) {
+				continue;
+			}
+			int[] c = counts.computeIfAbsent(m.getHookType(), k -> new int[3]);
+			c[0]++;
+			if (p.outlier()) {
+				c[1]++;
+			}
+			if (m.isAdDisclosure()) {
+				c[2]++;
+			}
+		}
+		return counts.entrySet()
+			.stream()
+			.map(e -> new HookTypeStat(e.getKey(), e.getValue()[0], e.getValue()[1],
+					OutlierCalculator.percent(e.getValue()[1], e.getValue()[0]), e.getValue()[2]))
+			.sorted(java.util.Comparator.comparing(HookTypeStat::outlierRate,
+					java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
+				.thenComparing(HookTypeStat::count, java.util.Comparator.reverseOrder()))
+			.toList();
+	}
+
+	private static PostCard toCard(ScoredPost p, MediaMetricSnapshot s, IgMedia m) {
+		if (s == null || m == null) {
+			return null;
+		}
+		return new PostCard(m.getId(), m.getPermalink(), m.getThumbnailUrl(), m.getThumbnailUrlExpiresAt(),
+				m.getCaptionFirstLine(), m.getCaptionHook(), m.getHookType(), m.isAdDisclosure(), m.getCallToAction(), m.getPostedAt(), p.views(), p.multiple(), p.commentRate(), s.getLikeCount(),
+				s.getCommentsCount(), s.getSaved(), s.getShares(), s.getSkipRate(), s.getAvgWatchTimeMs());
+	}
+
+	/**
+	 * 내 계정 요약. 아웃라이어와 나머지 게시물의 스킵률·저장률을 비교한다.
+	 * "잘된 게시물은 첫 3초에 덜 넘겨졌나"를 보는 기준값이고, 추천 효과 검증(#14)에서도 쓴다.
+	 */
+	private OwnSummary ownSummary(String ownAccount, AccountOutliers own, Map<String, MediaMetricSnapshot> snapshots) {
+		Set<String> outlierIds = own.outliers().stream().map(ScoredPost::mediaId).collect(Collectors.toSet());
+		List<MediaMetricSnapshot> judged = own.posts()
+			.stream()
+			.map(p -> snapshots.get(key(ownAccount, p.mediaId())))
+			.filter(Objects::nonNull)
+			.toList();
+		List<MediaMetricSnapshot> outlierSnaps = judged.stream().filter(s -> outlierIds.contains(s.getMediaId())).toList();
+		List<MediaMetricSnapshot> others = judged.stream().filter(s -> !outlierIds.contains(s.getMediaId())).toList();
+		return new OwnSummary(medianOf(judged.stream().map(MediaMetricSnapshot::getSkipRate)),
+				medianOf(outlierSnaps.stream().map(MediaMetricSnapshot::getSkipRate)),
+				medianOf(others.stream().map(MediaMetricSnapshot::getSkipRate)), medianSaveRate(judged),
+				medianSaveRate(outlierSnaps), medianSaveRate(others));
+	}
+
+	/** 저장률 = 저장 수 / 조회수 (%). */
+	private static Double medianSaveRate(Collection<MediaMetricSnapshot> snaps) {
+		return medianOf(snaps.stream()
+			.filter(s -> s.getSaved() != null && s.getViews() != null && s.getViews() > 0)
+			.map(s -> 100.0 * s.getSaved() / s.getViews()));
+	}
+
+	private static Double medianOf(Stream<Double> values) {
+		List<Double> list = values.filter(Objects::nonNull).toList();
+		return list.isEmpty() ? null : Math.round(OutlierCalculator.median(list) * 100) / 100.0;
+	}
+
+	/**
+	 * @param fewReferences 비교된 참고 계정이 권장(3개)보다 적어 한 계정 스타일에 치우칠 수 있음
+	 */
+	public record AnalysisReport(Long analysisId, AccountReport own, OwnSummary ownSummary,
+			List<AccountReport> references, List<FailedReference> failedReferences, boolean fewReferences) {
+	}
+
+	/**
+	 * @param judgedCount   판정한 릴스 수 (게시 7일 이상)
+	 * @param excludedCount 게시 7일 이상인데 조회수가 없어 뺀 릴스 수
+	 * @param outlierCount  중앙값의 2배 이상인 릴스 수
+	 * @param cards         배수 높은 순 최대 5개
+	 * @param youngCount    게시 7일 미만이라 아직 판정하지 않은 릴스 수
+	 * @param lowSample     판정한 릴스가 적어 참고용
+	 */
+	public record AccountReport(String username, boolean mine, int judgedCount, int excludedCount,
+			Double medianViews, Double meanViews, int outlierCount, List<PostCard> cards, int youngCount,
+			boolean lowSample, List<HookTypeStat> hookTypes) {
+	}
+
+	/**
+	 * @param count        이 유형의 판정한 릴스 수
+	 * @param outlierCount 그중 아웃라이어 수
+	 * @param outlierRate  아웃라이어 비율(%)
+	 * @param adCount      그중 광고 표시가 있는 수
+	 */
+	public record HookTypeStat(CaptionHook.HookType type, int count, int outlierCount, Double outlierRate,
+			int adCount) {
+	}
+
+	/**
+	 * 아웃라이어 카드. 썸네일 URL은 며칠 뒤 만료된다(thumbnailExpiresAt). 저장·공유·스킵률은 내 계정만 있다.
+	 */
+	public record PostCard(String mediaId, String permalink, String thumbnailUrl, Instant thumbnailExpiresAt,
+			String captionFirstLine, String captionHook, CaptionHook.HookType hookType, boolean adDisclosure,
+			CaptionHook.CallToAction callToAction, Instant postedAt, int views, Double multiple, Double commentRate, Integer likes,
+			Integer comments, Integer saved, Integer shares, Double skipRate, Integer avgWatchTimeMs) {
+	}
+
+	/** 스킵률·저장률(%)의 중앙값. 전체 / 아웃라이어 / 나머지. 값이 없으면 null. */
+	public record OwnSummary(Double medianSkipRate, Double outlierMedianSkipRate, Double otherMedianSkipRate,
+			Double medianSaveRate, Double outlierMedianSaveRate, Double otherMedianSaveRate) {
+	}
+
+	public record FailedReference(String username, String failureType) {
+	}
+}
